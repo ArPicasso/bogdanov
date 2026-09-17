@@ -1,0 +1,54 @@
+name: Запустить бота
+
+# Держит бота живым на раннере GitHub — нужен только для тестирования.
+# Постоянный хостинг делается из ryazan-bot.service на своём сервере.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Сколько минут держать бота живым (максимум 350)"
+        required: false
+        default: "55"
+
+concurrency:
+  group: ryazan-bot
+  cancel-in-progress: true
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Поставить зависимости
+        run: pip install --disable-pip-version-check -q -r requirements.txt
+
+      - name: Проверить токен
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "::error::Секрет BOT_TOKEN не задан. Settings -> Secrets and variables -> Actions -> New repository secret, имя BOT_TOKEN."
+            exit 1
+          fi
+          echo "Токен на месте."
+
+      - name: Запустить бота
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          echo "Бот работает ${MINUTES} мин. Открывай его в Telegram и жми /start."
+          code=0
+          timeout "${MINUTES}m" python bot.py || code=$?
+          if [ "$code" = "124" ]; then
+            echo "Время вышло, бот остановлен штатно."
+            exit 0
+          fi
+          exit "$code"

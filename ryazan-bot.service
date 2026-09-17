@@ -1,0 +1,13 @@
+[Unit]
+Description=MHK Ryazan-VDV schedule bot
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/ryazan_bot
+EnvironmentFile=/opt/ryazan_bot/.env
+ExecStart=/opt/ryazan_bot/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
