@@ -5,6 +5,9 @@ const tg = window.Telegram && window.Telegram.WebApp;
 const inTelegram = !!(tg && tg.initData);
 const TZ = "Europe/Moscow";
 const FAV_KEY = "fav_team";
+const THEME_KEY = "theme";          // "auto" | "light" | "dark", хранится на устройстве
+const SPLASH_KEY = "splash_team";   // эмблема для заставки: её рисуют до загрузки данных
+const SURFACE = { light: "#ffffff", dark: "#111114" };
 
 const DOW = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const MON_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -21,8 +24,8 @@ const ICON = {
 };
 // «Надувная лента» Slush — плоская, без градиента: синяя трубка в чёрном контуре
 const RIBBON = `<svg class="ribbon" viewBox="0 0 220 150" aria-hidden="true">
-  <path d="M10 120 C 60 20, 110 150, 150 70 S 210 10, 230 40" stroke="#000" stroke-width="30"/>
-  <path d="M10 120 C 60 20, 110 150, 150 70 S 210 10, 230 40" stroke="#4da2ff" stroke-width="27"/>
+  <path class="o" d="M10 120 C 60 20, 110 150, 150 70 S 210 10, 230 40" stroke-width="30"/>
+  <path class="f" d="M10 120 C 60 20, 110 150, 150 70 S 210 10, 230 40" stroke-width="27"/>
 </svg>`;
 
 const state = {
@@ -85,9 +88,44 @@ function loadFav() {
     cloud.getItem(FAV_KEY, (err, v) => resolve(err ? lsGet(FAV_KEY) : v || lsGet(FAV_KEY)));
   });
 }
+function rememberSplash(id) {
+  const t = team(id);
+  lsSet(SPLASH_KEY, JSON.stringify({ logo: t.logo || "", abbr: t.abbr || "" }));
+}
 function saveFav(id) {
   lsSet(FAV_KEY, id);
+  rememberSplash(id);
   if (cloud) cloud.setItem(FAV_KEY, id, () => {});
+}
+
+// ---------- тема ----------
+
+function themePref() {
+  const v = lsGet(THEME_KEY);
+  return v === "light" || v === "dark" ? v : "auto";
+}
+function systemTheme() {
+  if (inTelegram && tg.colorScheme) return tg.colorScheme;
+  return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function applyTheme() {
+  const pref = themePref();
+  const theme = pref === "auto" ? systemTheme() : pref;
+  document.documentElement.dataset.theme = theme;
+  if (inTelegram && tg.isVersionAtLeast) {
+    if (tg.isVersionAtLeast("6.1")) {
+      tg.setHeaderColor("#000000");   // сливается с бегущей строкой в обеих темах
+      tg.setBackgroundColor(SURFACE[theme]);
+    }
+    if (tg.isVersionAtLeast("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(SURFACE[theme]);
+  }
+}
+function themePills() {
+  const pref = themePref();
+  const auto = inTelegram ? "Как в Telegram" : "Как в системе";
+  return `<div class="band-label">Оформление</div><div class="pills" role="group" aria-label="Оформление">${[["auto", auto], ["light", "Светлое"], ["dark", "Тёмное"]]
+    .map(([k, v]) => `<button class="${pref === k ? "on" : ""}" data-theme-pick="${k}" aria-pressed="${pref === k}">${v}</button>`)
+    .join("")}</div>`;
 }
 
 // ---------- выборки ----------
@@ -309,7 +347,7 @@ function renderPicker(onboarding) {
   const chosen = state.draft || state.fav;
   let html = onboarding
     ? `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`
-    : `<section class="band concrete"><h1>Моя команда</h1><div class="lede">Сейчас: ${esc(team(state.fav).name)}</div></section>`;
+    : `<section class="band concrete"><h1>Моя команда</h1><div class="lede">Сейчас: ${esc(team(state.fav).name)}</div>${themePills()}</section>`;
   for (const conf of ["east", "west"]) {
     const list = state.data.teams.filter((t) => t.conf === conf).sort((a, b) => a.name.localeCompare(b.name, "ru"));
     html += `<div class="label">${CONF[conf]}<span class="aside">${list.length} команд</span></div><div class="picker">`;
@@ -447,8 +485,14 @@ function confirmTeam() {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-close],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-close],#sheet-backdrop");
   if (!el || el.disabled) return;
+  if (el.dataset.themePick) {
+    lsSet(THEME_KEY, el.dataset.themePick);
+    applyTheme();
+    haptic();
+    return render();
+  }
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
   if (el.hasAttribute("data-confirm")) return confirmTeam();
   if (el.dataset.tab) return go(el.dataset.tab);
@@ -498,15 +542,20 @@ function startParam() {
   return fromTg || q.get("startapp") || q.get("team");
 }
 
+function hideSplash() {
+  const splash = $("#splash");
+  if (!splash) return;
+  splash.classList.add("out");
+  setTimeout(() => splash.remove(), 300);
+}
+
 async function main() {
+  applyTheme();
+  if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
   if (inTelegram) {
     tg.ready();
     tg.expand();
-    if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.1")) {
-      tg.setHeaderColor("#000000");
-      tg.setBackgroundColor("#ffffff");
-    }
-    if (tg.isVersionAtLeast && tg.isVersionAtLeast("7.10") && tg.setBottomBarColor) tg.setBottomBarColor("#ffffff");
+    tg.onEvent("themeChanged", applyTheme);
     tg.BackButton.onClick(closeMatch);
   }
   try {
@@ -515,6 +564,7 @@ async function main() {
     state.data = await r.json();
   } catch (err) {
     $("#screen").innerHTML = `<div class="empty" style="margin-top:24px">Не удалось загрузить матчи. Проверьте интернет и откройте приложение ещё раз.</div>`;
+    hideSplash();
     return;
   }
   state.data.teams.forEach((t) => { state.teams[t.id] = t; });
@@ -528,8 +578,10 @@ async function main() {
     state.cal.team = fav;
     state.conf = state.teams[fav].conf;
     if (fromLink === fav && fav !== saved) saveFav(fav);
+    else rememberSplash(fav);
   }
   render();
+  hideSplash();
 }
 
 main();

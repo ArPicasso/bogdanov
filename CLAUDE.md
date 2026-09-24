@@ -31,6 +31,8 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `rhockey.py` | Календарь всей лиги с r-hockey.ru — временно, до открытия rhl.fhr.ru |
 | `build_data.py` | Собирает `webapp/data/league.json`: команды, матчи, результаты, таблица |
 | `webapp/` | Мини-апп: `index.html`, `style.css`, `app.js`, без сборки. Публикуется на GitHub Pages |
+| `webapp/brand/` | Иконка для экрана загрузки Telegram и фавиконки (`icon.svg`, `icon-512.png`) |
+| `webapp/logos/` | Эмблемы клубов, путь — поле `logo` в `teams.json` |
 | `calendar.pdf` | Календарь на печать, отдаётся по кнопке |
 | `docs/research/` | Результаты разведки: источники данных, аудитория, письмо клубу |
 
