@@ -52,6 +52,5 @@ BOT_TOKEN=... venv/bin/python bot.py
 
 ## Известные баги
 
-- Повторное нажатие на тот же месяц или соперника → `message is not modified`,
-  `c.answer()` не выполняется, кружок на кнопке зависает. Чинится обёрткой
-  `edit_text` в try/except.
+- ~~Повторное нажатие на тот же месяц или соперника → `message is not modified`~~ —
+  исправлено: `edit_text` обёрнут в `safe_edit()` (try/except `TelegramBadRequest`).

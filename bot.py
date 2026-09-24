@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
                            InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup)
@@ -182,6 +182,13 @@ def remind_text(chat_id: int) -> str:
 dp = Dispatcher()
 
 
+async def safe_edit(c: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup) -> None:
+    try:
+        await c.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:   # текст и клавиатура не изменились
+        pass
+
+
 @dp.message(CommandStart())
 async def start(m: Message):
     await m.answer("Расписание МХК «Рязань-ВДВ», РХЛ 2026/27 🏒\nЖми кнопки внизу.\n\n"
@@ -209,8 +216,7 @@ async def h_months(m: Message):
 async def cb_month(c: CallbackQuery):
     y, mo = map(int, c.data[2:].split("-"))
     games = [g for g in GAMES if (g.d.year, g.d.month) == (y, mo)]
-    await c.message.edit_text(list_text(f"🗓 <b>{MONTHS[mo].capitalize()} {y}</b>", games),
-                              reply_markup=months_kb())
+    await safe_edit(c, list_text(f"🗓 <b>{MONTHS[mo].capitalize()} {y}</b>", games), months_kb())
     await c.answer()
 
 
@@ -223,7 +229,7 @@ async def h_opps(m: Message):
 async def cb_opp(c: CallbackQuery):
     opp = OPPONENTS[int(c.data[2:])]
     games = [g for g in GAMES if g.opponent == opp]
-    await c.message.edit_text(list_text(f"🆚 <b>{opp}</b>", games), reply_markup=opponents_kb())
+    await safe_edit(c, list_text(f"🆚 <b>{opp}</b>", games), opponents_kb())
     await c.answer()
 
 
@@ -260,7 +266,7 @@ async def cb_remind(c: CallbackQuery):
     cid = c.message.chat.id
     SUBS.symmetric_difference_update({cid})
     save_subs(SUBS)
-    await c.message.edit_text(remind_text(cid), reply_markup=remind_kb(cid))
+    await safe_edit(c, remind_text(cid), remind_kb(cid))
     await c.answer("Готово")
 
 
