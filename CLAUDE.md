@@ -21,6 +21,10 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `bot.py` | Вся логика: хендлеры, форматирование, `reminder_loop` |
 | `games.json` | Календарь сезона, 48 игр. Правится руками |
 | `subscribers.json` | Подписчики на напоминания. Не в git |
+| `league.py` | Загрузка и разбор протоколов матчей с сайта лиги → `results.json` (ADR-001) |
+| `results.json` | Результаты: id турнира → номер матча `n` (как в `games.json`) → протокол. Не в git |
+| `tests/` | Тесты на `unittest`, фикстуры — реальные страницы сайта лиги |
+| `docs/adr/` | Архитектурные решения, по файлу на решение |
 | `calendar.pdf` | Календарь на печать, отдаётся по кнопке |
 | `docs/research/` | Результаты разведки: источники данных, аудитория, письмо клубу |
 
@@ -33,7 +37,13 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 BOT_TOKEN=... venv/bin/python bot.py
+venv/bin/python -m unittest discover -s tests   # тесты
+venv/bin/python league.py                        # скачать протоколы в results.json
 ```
+
+`league.py` без аргументов берёт последний регулярный чемпионат на `nmhl.fhr.ru`.
+Для сезона 2026/27, когда откроется сайт РХЛ: `league.py --site https://rhl.fhr.ru`.
+Запросы к сайту лиги идут по одному с паузой в секунду — не убирать.
 
 ## Правила
 
