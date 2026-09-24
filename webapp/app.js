@@ -9,7 +9,8 @@ const TZ = "Europe/Moscow";
 const FAV_KEY = "fav_team";
 const THEME_KEY = "theme";          // "auto" | "light" | "dark", хранится на устройстве
 const SPLASH_KEY = "splash_team";   // эмблема для заставки: её рисуют до загрузки данных
-const SURFACE = { light: "#ffffff", dark: "#111114" };
+const SURFACE = { light: "#ffffff", dark: "#131922" };
+const HEADER = { light: "#000000", dark: "#0b0f15" };   // в тон бегущей строке
 const DATA_KEY = "league_cache";    // прошлые данные: повторный запуск рисуется сразу, свежие — в фоне
 const SPLASH_MIN_MS = 480;          // столько нужно буквам заставки, чтобы приземлиться
 
@@ -126,7 +127,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = theme;
   if (inTelegram && tg.isVersionAtLeast) {
     if (tg.isVersionAtLeast("6.1")) {
-      tg.setHeaderColor("#000000");   // сливается с бегущей строкой в обеих темах
+      tg.setHeaderColor(HEADER[theme]);
       tg.setBackgroundColor(SURFACE[theme]);
     }
     if (tg.isVersionAtLeast("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(SURFACE[theme]);
