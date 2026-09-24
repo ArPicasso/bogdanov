@@ -43,6 +43,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           MINUTES: ${{ inputs.minutes }}
+          WEBAPP_URL: ${{ vars.WEBAPP_URL }}
         run: |
           echo "Бот работает ${MINUTES} мин. Открывай его в Telegram и жми /start."
           code=0

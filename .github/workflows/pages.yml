@@ -1,0 +1,63 @@
+name: Мини-апп
+
+# Собирает данные лиги и публикует webapp/ на GitHub Pages (ADR-003).
+# Один раз включить: Settings → Pages → Source: GitHub Actions.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 * * * *"   # раз в час; GitHub может запускать с опозданием
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Поставить зависимости
+        run: pip install --disable-pip-version-check -q -r requirements.txt
+
+      # Протоколы копятся между запусками, чтобы не качать весь сезон каждый час
+      - uses: actions/cache@v4
+        with:
+          path: results.json
+          key: results-${{ github.run_id }}
+          restore-keys: results-
+
+      # Пока сайт РХЛ закрыт, шаг выключен. Включить: Settings → Variables → LEAGUE_SITE=https://rhl.fhr.ru
+      - name: Скачать протоколы матчей
+        if: vars.LEAGUE_SITE != ''
+        continue-on-error: true
+        run: python league.py --site "${{ vars.LEAGUE_SITE }}"
+
+      - name: Собрать данные
+        run: python build_data.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: webapp
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

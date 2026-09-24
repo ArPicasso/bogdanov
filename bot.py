@@ -14,11 +14,13 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
-                           InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup)
+                           InlineKeyboardMarkup, KeyboardButton, MenuButtonWebApp, Message,
+                           ReplyKeyboardMarkup, WebAppInfo)
 
 BASE = Path(__file__).parent
 TZ = ZoneInfo("Europe/Moscow")
 SUBS_FILE = BASE / "subscribers.json"
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")   # мини-апп (ADR-003); пусто — бот без кнопки
 REMIND_TODAY_AT = time(10, 0)      # утром в день игры
 REMIND_TOMORROW_AT = time(19, 0)   # вечером накануне
 
@@ -193,6 +195,10 @@ async def safe_edit(c: CallbackQuery, text: str, reply_markup: InlineKeyboardMar
 async def start(m: Message):
     await m.answer("Расписание МХК «Рязань-ВДВ», РХЛ 2026/27 🏒\nЖми кнопки внизу.\n\n"
                    + next_game_text(), reply_markup=MAIN_KB)
+    if WEBAPP_URL:
+        await m.answer("Календарь всей лиги, таблица и карточки матчей — в приложении:",
+                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                           text="📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))]]))
 
 
 @dp.message(Command("next"))
@@ -317,6 +323,9 @@ async def main():
         BotCommand(command="remind", description="Напоминания"),
         BotCommand(command="pdf", description="PDF на печать"),
     ])
+    if WEBAPP_URL:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+            text="Приложение", web_app=WebAppInfo(url=WEBAPP_URL)))
     asyncio.create_task(reminder_loop(bot))
     await dp.start_polling(bot)
 

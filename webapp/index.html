@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>РХЛ — матчи и таблица</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="screen" aria-live="polite"></main>
+
+  <nav class="tabs" id="tabs" hidden>
+    <button data-tab="home" class="active"><span class="ico">🏒</span>Главная</button>
+    <button data-tab="calendar"><span class="ico">🗓</span>Календарь</button>
+    <button data-tab="table"><span class="ico">📊</span>Таблица</button>
+    <button data-tab="team"><span class="ico">⭐</span>Команда</button>
+  </nav>
+
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+  <section class="sheet" id="sheet" hidden role="dialog" aria-modal="true"></section>
+
+  <script src="app.js"></script>
+</body>
+</html>
