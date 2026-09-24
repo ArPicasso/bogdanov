@@ -4,15 +4,104 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#000000">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>РХЛ — матчи и таблица</title>
+  <link rel="icon" href="brand/icon.svg" type="image/svg+xml">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Тема до первой отрисовки: иначе в тёмном Telegram мелькает белый экран
+    (function () {
+      var t = "light";
+      try {
+        var pref = localStorage.getItem("theme");
+        var w = window.Telegram && window.Telegram.WebApp;
+        if (pref === "light" || pref === "dark") t = pref;
+        else if (w && w.initData && w.colorScheme) t = w.colorScheme;
+        else if (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) t = "dark";
+      } catch (e) { /* хранилище недоступно — светлая */ }
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <style>
+    /* Заставка (DESIGN.md → «Экран запуска»). Стили здесь, чтобы она рисовалась до style.css */
+    #splash {
+      position: fixed; inset: 0; z-index: 100; overflow: hidden;
+      display: grid; place-items: center;
+      background: #dceeff; color: #000;
+      transition: opacity .25s ease-out;
+    }
+    :root[data-theme="dark"] #splash { background: #152a44; color: #f5f5f7; }
+    :root[data-theme="dark"] body { background: #111114; }
+    #splash.out { opacity: 0; pointer-events: none; }
+    #splash .sp-ribbon { position: absolute; left: -12%; top: 50%; width: 124%; transform: translateY(-58%); }
+    #splash .sp-ribbon path { fill: none; stroke-linecap: round; }
+    #splash .sp-ribbon .o { stroke: currentColor; }
+    #splash .sp-ribbon .f { stroke: #4da2ff; }
+    #splash .sp-c { position: relative; display: grid; justify-items: center; gap: 14px; text-align: center; }
+    #splash .sp-em {
+      display: none; place-items: center; width: 96px; height: 96px; margin-bottom: 4px;
+      border-radius: 50%; border: 1.5px solid currentColor; background: #fff; overflow: hidden;
+      transform: rotate(-6deg);
+    }
+    #splash .sp-em img { width: 78%; height: 78%; object-fit: contain; }
+    #splash .sp-em.ab { background: #5c4ade; color: #fff; font: 700 22px/1 system-ui, sans-serif; }
+    #splash .sp-word { font: 800 92px/.8 "Unbounded", "Arial Black", system-ui, sans-serif; letter-spacing: -.02em; }
+    #splash .sp-sub { font: 700 13px/1.2 "Onest", system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; }
+    #splash .sp-season {
+      padding: 5px 12px; border: 1px solid currentColor; border-radius: 9999px;
+      background: #55db9c; color: #000; font: 700 12px/1.2 "Onest", system-ui, sans-serif; letter-spacing: .04em;
+    }
+    :root[data-theme="dark"] #splash .sp-season { border-color: #f5f5f7; }
+    #splash .sp-pucks { position: absolute; bottom: calc(56px + env(safe-area-inset-bottom)); display: flex; gap: 12px; }
+    #splash .sp-pucks i { width: 18px; height: 9px; border-radius: 50%; background: currentColor; animation: sp-hop .9s ease-in-out infinite; }
+    #splash .sp-pucks i:nth-child(2) { animation-delay: .15s; }
+    #splash .sp-pucks i:nth-child(3) { animation-delay: .3s; }
+    @keyframes sp-hop { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-12px); } }
+    @media (prefers-reduced-motion: reduce) { #splash .sp-pucks i { animation: none; } #splash { transition: none; } }
+  </style>
+  <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@500;700&family=Unbounded:wght@800&display=swap">
-  <link rel="stylesheet" href="style.css">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Onest:wght@500;700&family=Unbounded:wght@800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@500;700&family=Unbounded:wght@800&display=swap"></noscript>
 </head>
 <body>
+  <div id="splash" role="status" aria-label="Загрузка">
+    <svg class="sp-ribbon" viewBox="0 0 400 260" aria-hidden="true">
+      <path class="o" d="M-20 210 C 70 30, 170 280, 250 130 S 370 20, 430 80" stroke-width="44"/>
+      <path class="f" d="M-20 210 C 70 30, 170 280, 250 130 S 370 20, 430 80" stroke-width="40"/>
+    </svg>
+    <div class="sp-c">
+      <span class="sp-em" id="splash-em" aria-hidden="true"></span>
+      <div class="sp-word">РХЛ</div>
+      <div class="sp-sub">Матчи · Таблица · Календарь</div>
+      <div class="sp-season">сезон 2026/27</div>
+    </div>
+    <div class="sp-pucks" aria-hidden="true"><i></i><i></i><i></i></div>
+  </div>
+  <script>
+    // Эмблема любимой команды на заставке — из прошлого запуска, данные ещё не загружены
+    (function () {
+      try {
+        var d = JSON.parse(localStorage.getItem("splash_team") || "null");
+        var el = document.getElementById("splash-em");
+        if (!d || !el) return;
+        if (d.logo && /^logos\/[\w.-]+$/.test(d.logo)) {
+          var img = new Image();
+          img.alt = "";
+          img.src = d.logo;
+          el.appendChild(img);
+        } else if (d.abbr) {
+          el.textContent = d.abbr;
+          el.className += " ab";
+        } else {
+          return;
+        }
+        el.style.display = "grid";
+      } catch (e) { /* без эмблемы */ }
+    })();
+  </script>
+
   <div class="marquee" aria-hidden="true"><div class="marquee-track" id="marquee"></div></div>
 
   <main id="screen" aria-live="polite"></main>
