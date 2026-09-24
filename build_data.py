@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -147,6 +148,12 @@ def standings(teams: Teams, games: list[dict]) -> dict[str, list[dict]]:
 # ---------- сборка ----------
 
 
+def links(env=os.environ) -> dict[str, str]:
+    """Ссылки на бота и мини-апп в Telegram (ADR-004). Пустые не пишем — мини-апп их спрячет."""
+    out = {"bot": env.get("BOT_LINK", "").strip(), "app": env.get("APP_LINK", "").strip()}
+    return {k: v.rstrip("/") for k, v in out.items() if v.startswith("https://t.me/")}
+
+
 def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results) -> tuple[dict, list[str]]:
     games = merge_calendar(teams, raw, official_games(teams))
     unmatched = attach_results(games, teams, results)
@@ -158,6 +165,7 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results) -> 
             "calendar": "ФХР (официально) для «Рязань-ВДВ», r-hockey.ru (неофициально) для остальных",
             "results": "протоколы лиги",
         },
+        "links": links(),
         "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo") if k in t} for t in teams.all],
         "games": games,
         "standings": standings(teams, games),

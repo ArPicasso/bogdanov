@@ -155,7 +155,7 @@ function toggleTheme(btn) {
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
   clearTimeout(themeAnimTimer);
   themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 400);
-  if (state.tab === "team" || !state.fav) {
+  if (state.tab === "me" || !state.fav) {
     const y = window.scrollY;
     render();
     window.scrollTo(0, y);
@@ -164,7 +164,7 @@ function toggleTheme(btn) {
 function themePills() {
   const pref = themePref();
   const auto = launchedInTelegram ? "Как в Telegram" : "Как в системе";
-  return `<div class="band-label">Оформление</div><div class="pills" role="group" aria-label="Оформление">${[["auto", auto], ["light", "Светлое"], ["dark", "Тёмное"]]
+  return `<div class="label">Оформление</div><div class="pills theme-pills" role="group" aria-label="Оформление">${[["auto", auto], ["light", "Светлое"], ["dark", "Тёмное"]]
     .map(([k, v]) => `<button class="${pref === k ? "on" : ""}" data-theme-pick="${k}" aria-pressed="${pref === k}">${v}</button>`)
     .join("")}</div>`;
 }
@@ -238,7 +238,7 @@ function gameRow(g, next) {
   const goals = (id) => (past ? `<span class="gl${lead(id) ? " lead" : ""}">${id === g.home ? g.score.home : g.score.away}</span>` : "");
   const line = (id) => `<div>${emblem(id)}<span class="nm${id === state.fav ? " me" : ""}">${esc(team(id).name)}</span>${goals(id)}</div>`;
   const right = past ? resultPill(g) : `<span class="kick">${g.time ? esc(g.time) : ""}</span>`;
-  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}"${next ? ' id="next-anchor"' : ""}>
+  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
     <div class="date"><b>${d.getUTCDate()}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
     <div class="t">${line(g.home)}${line(g.away)}</div>
     <div class="r">${right}</div>
@@ -253,40 +253,48 @@ function footer() {
 
 // ---------- экраны ----------
 
+// Три цифры сезона: в сезоне — место, очки, форма; до старта — матчи, дом и выезд, дни до старта
+function seasonStats(me) {
+  const st = standingOf(me);
+  const mine = gamesOf(me);
+  if (st && st.row.gp) {
+    const form = st.row.form.length ? `<span class="form">${st.row.form.map((f) => `<i class="${f}"></i>`).join("")}</span>` : "—";
+    return `<div class="stat"><b>${st.place}</b><span>место<br>${CONF[st.conf]}</span></div>
+      <div class="stat"><b>${st.row.pts}</b><span>${plural(st.row.pts, "очко", "очка", "очков")}<br>за ${st.row.gp} ${plural(st.row.gp, "игру", "игры", "игр")}</span></div>
+      <div class="stat"><b>${form}</b><span>форма<br>5 игр</span></div>`;
+  }
+  if (!mine.length) return "";
+  const home = mine.filter((g) => g.home === me).length;
+  const days = Math.max(daysFromToday(mine[0].date), 0);
+  return `<div class="stat"><b>${mine.length}</b><span>матчей<br>в сезоне</span></div>
+    <div class="stat"><b>${home}</b><span>дома,<br>${mine.length - home} на выезде</span></div>
+    <div class="stat"><b>${days}</b><span>${plural(days, "день", "дня", "дней")}<br>до старта</span></div>`;
+}
+
+// Самый длинный кусок названия, который нельзя перенести: по нему подбирается кегль шапки
+function longestChunk(name) {
+  return Math.max(...name.split(/\s+/).flatMap((w) => w.split(/(?<=-)/)).map((x) => x.length));
+}
+
 function renderHome() {
   const me = state.fav;
   const t = team(me);
-  const st = standingOf(me);
   const mine = gamesOf(me);
   const next = nextGame(me);
   const last = lastPlayed(me);
   const upcoming = mine.filter(isUpcoming).slice(1, 4);
 
   let html = `<section class="band sky">${RIBBON}
-    <div class="hero">${emblem(me, "xl")}<div><h1>${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>
+    <div class="hero"><button type="button" class="hero-em" data-switch-open aria-label="Сменить команду">${emblem(me, "xl")}</button><div><h1 style="--w:${longestChunk(t.name)}">${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>
   </section>`;
 
-  if (st && st.row.gp) {
-    const form = st.row.form.length ? `<span class="form">${st.row.form.map((f) => `<i class="${f}"></i>`).join("")}</span>` : "—";
-    html += `<div class="stats">
-      <div class="stat"><b>${st.place}</b><span>место<br>${CONF[st.conf]}</span></div>
-      <div class="stat"><b>${st.row.pts}</b><span>${plural(st.row.pts, "очко", "очка", "очков")}<br>за ${st.row.gp} ${plural(st.row.gp, "игру", "игры", "игр")}</span></div>
-      <div class="stat"><b>${form}</b><span>форма<br>5 игр</span></div>
-    </div>`;
-  } else if (mine.length) {
-    const home = mine.filter((g) => g.home === me).length;
-    const days = Math.max(daysFromToday(mine[0].date), 0);
-    html += `<div class="stats">
-      <div class="stat"><b>${mine.length}</b><span>матчей<br>в сезоне</span></div>
-      <div class="stat"><b>${home}</b><span>дома,<br>${mine.length - home} на выезде</span></div>
-      <div class="stat"><b>${days}</b><span>${plural(days, "день", "дня", "дней")}<br>до старта</span></div>
-    </div>`;
-  }
+  const stats = seasonStats(me);
+  if (stats) html += `<div class="stats">${stats}</div>`;
 
   if (next) {
     const today = daysFromToday(next.date) === 0;
     html += `<div class="label">Следующий матч${next.n ? `<span class="aside">№ ${esc(next.n)}</span>` : ""}</div>
-      <div class="board-card tap" data-game="${esc(next.id)}">
+      <div class="board-card tap" data-game="${esc(next.id)}" role="button" tabindex="0">
         <div class="board-top">
           <span class="tags">${whereTag(next, me)}${today ? '<span class="tag today">Сегодня</span>' : ""}${next.official ? "" : '<span class="tag soft">предварительно</span>'}</span>
           <span class="when">${esc(fmtLong(next.date))}</span>
@@ -299,7 +307,7 @@ function renderHome() {
 
   if (last) {
     html += `<div class="label">Последний результат</div>
-      <div class="board-card tap" data-game="${esc(last.id)}">
+      <div class="board-card tap" data-game="${esc(last.id)}" role="button" tabindex="0">
         <div class="board-top"><span class="tags">${whereTag(last, me)}${resultPill(last)}</span><span class="when">${esc(fmtLong(last.date))}</span></div>
         ${board(last)}
         ${periodsLine(last)}
@@ -307,7 +315,7 @@ function renderHome() {
   }
 
   if (upcoming.length) {
-    html += `<div class="label">Дальше<span class="aside link" data-tab="calendar">Весь календарь</span></div>
+    html += `<div class="label">Дальше<button type="button" class="aside link" data-tab="calendar">Весь календарь</button></div>
       <div class="list">${upcoming.map((g) => gameRow(g, false)).join("")}</div>`;
   }
   return html + footer();
@@ -364,15 +372,15 @@ function renderTable() {
   let html = `<section class="band mint"><h1>Таблица</h1><div class="pills">${Object.entries(CONF)
     .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}">${v}</button>`)
     .join("")}</div></section>`;
-  html += `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span>В</span><span>П</span><span>Ш</span><span>О</span></div>`;
+  html += `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span class="wl">В</span><span class="wl">П</span><span>Ш</span><span>О</span></div>`;
   rows.forEach((r, i) => {
     if (i === PLAYOFF_CUT) html += `<div class="cut"><span>плей-офф ↑</span></div>`;
     const wins = r.w + r.otw + r.sow;
     const losses = r.l + r.otl + r.sol;
-    html += `<div class="st-row${r.team === state.fav ? " me" : ""}" data-team="${esc(r.team)}">
+    html += `<div class="st-row${r.team === state.fav ? " me" : ""}" data-team="${esc(r.team)}" role="button" tabindex="0">
       <span class="pos">${i + 1}</span>
       <span class="tm">${emblem(r.team)}<span>${esc(team(r.team).name)}</span></span>
-      <span class="n">${r.gp}</span><span class="n">${wins}</span><span class="n">${losses}</span>
+      <span class="n">${r.gp}</span><span class="n wl">${wins}</span><span class="n wl">${losses}</span>
       <span class="n">${r.gf}:${r.ga}</span><span class="pts num">${r.pts}</span>
     </div>`;
   });
@@ -384,28 +392,125 @@ function renderTable() {
   return html;
 }
 
-function renderPicker(onboarding) {
-  const chosen = state.draft || state.fav;
-  let html = onboarding
-    ? `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`
-    : `<section class="band concrete"><h1>Моя команда</h1><div class="lede">Сейчас: ${esc(team(state.fav).name)}</div>${themePills()}</section>`;
+// Сетка клубов по конференциям: первый запуск (attr = data-pick) и лист смены команды (data-switch)
+function teamGrid(chosen, attr) {
+  let html = "";
   for (const conf of ["east", "west"]) {
     const list = state.data.teams.filter((t) => t.conf === conf).sort((a, b) => a.name.localeCompare(b.name, "ru"));
     html += `<div class="label">${CONF[conf]}<span class="aside">${list.length} команд</span></div><div class="picker">`;
     for (const t of list) {
-      html += `<button class="pick${t.id === chosen ? " on" : ""}" data-pick="${esc(t.id)}" aria-pressed="${t.id === chosen}">
+      html += `<button class="pick${t.id === chosen ? " on" : ""}" ${attr}="${esc(t.id)}" aria-pressed="${t.id === chosen}">
         ${emblem(t.id, "md")}<div><b>${esc(t.name)}</b><small>${esc(t.city)}</small></div></button>`;
     }
     html += `</div>`;
   }
-  const changed = chosen && chosen !== state.fav;
-  const label = onboarding ? (chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду") : changed ? `Сохранить — ${esc(team(chosen).name)}` : "Команда выбрана";
-  html += `<div style="height:${onboarding ? 88 : 72}px"></div><div class="cta-bar${onboarding ? "" : " above-nav"}">
-    <button class="btn" data-confirm${(onboarding ? chosen : changed) ? "" : " disabled"}>${label}</button></div>`;
   return html;
 }
 
+function renderOnboarding() {
+  const chosen = state.draft;
+  let html = `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
+  html += teamGrid(chosen, "data-pick");
+  const label = chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду";
+  html += `<div style="height:88px"></div><div class="cta-bar"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
+  return html;
+}
+
+// ---------- экран «Я» (ADR-004) ----------
+
+function tgUser() {
+  return (inTelegram && tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
+}
+// Ссылка, которая открывает мини-апп сразу с этим клубом
+function inviteLink(id) {
+  const app = state.data.links && state.data.links.app;
+  if (app) return `${app}?startapp=${encodeURIComponent(id)}`;
+  return `${location.origin}${location.pathname}?team=${encodeURIComponent(id)}`;
+}
+function canStory() {
+  return inTelegram && typeof tg.shareToStory === "function" && tg.isVersionAtLeast("7.8");
+}
+
+const STAR = `<svg class="pp-star" viewBox="0 0 100 100" aria-hidden="true"><path d="m50 6 12.5 27 29.5 3.5-22 20 6 29.5L50 71 23.5 86l6-29.5-22-20L37 33z"/></svg>`;
+const ICON_ME = {
+  story: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3.2 2.2"/><path d="M12 8v8M8 12h8"/></svg>',
+  invite: '<svg viewBox="0 0 24 24"><path d="M20 4 3 11l6.5 2.5L12 20z"/><path d="m9.5 13.5 4-4"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+  swap: '<svg viewBox="0 0 24 24"><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></svg>',
+  chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+};
+
+function passport(me) {
+  const t = team(me);
+  const u = tgUser();
+  const who = u && u.first_name ? `${esc(u.first_name)} · ` : "";
+  const stats = seasonStats(me);
+  return `<article class="passport" aria-label="Паспорт болельщика">
+    <div class="pp-top"><span class="pp-tag">Паспорт болельщика</span>${STAR}</div>
+    <div class="pp-main">${emblem(me, "xl")}
+      <div class="pp-name"><small>Болею за</small><b style="--w:${longestChunk(t.name)}">${esc(t.name)}</b></div>
+    </div>
+    <div class="pp-meta">${who}${esc(state.data.league.split(" — ")[0])} · сезон ${esc(state.data.season)}</div>
+    ${stats ? `<div class="pp-stats">${stats}</div>` : ""}
+  </article>`;
+}
+
+function renderMe() {
+  const me = state.fav;
+  const t = team(me);
+  const u = tgUser();
+  const title = u && u.first_name ? u.first_name : "Профиль";
+  const bot = state.data.links && state.data.links.bot;
+  let html = `<section class="band concrete"><h1 style="--w:${longestChunk(title)}" class="fit">${esc(title)}</h1>
+    <div class="lede">Болеет за ${esc(t.name)}. Покажите это друзьям.</div></section>`;
+  html += passport(me);
+  html += `<div class="me-actions">
+    <button type="button" class="btn" data-story>${ICON_ME.story}${canStory() ? "Выложить в историю" : "Поделиться карточкой"}</button>
+    <button type="button" class="btn ghost" data-invite>${ICON_ME.invite}Позвать болеть вместе</button>
+  </div>`;
+  html += `<div class="label">Настройки</div><div class="menu">`;
+  if (bot) {
+    html += me === "ryazan-vdv"
+      ? `<button type="button" class="menu-row" data-remind>${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Накануне и в день игры — в боте</small></span>${ICON_ME.chev}</button>`
+      : `<div class="menu-row off">${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Пока только о «Рязань-ВДВ». Скоро — о любой команде</small></span></div>`;
+  }
+  html += `<button type="button" class="menu-row" data-switch-open>${ICON_ME.swap}<span><b>Сменить команду</b><small>Сейчас: ${esc(t.name)}</small></span>${ICON_ME.chev}</button>
+  </div>`;
+  html += themePills();
+  return html + footer();
+}
+
+// Лист со всеми клубами: одно касание — новая любимая команда
+function openTeamSheet() {
+  const html = `<div class="grab"></div>
+    <div class="sheet-head"><span class="when">Сменить команду</span>
+    <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
+    ${teamGrid(state.fav, "data-switch")}`;
+  showSheet(html);
+}
+
+function shareStory() {
+  const id = state.fav;
+  const t = team(id);
+  const link = inviteLink(id);
+  const text = `Болею за ${t.name}! Матчи и таблица РХЛ: ${link}`;
+  if (canStory()) {
+    tg.shareToStory(new URL(`stories/${id}.jpg`, location.href).href, { text: text.slice(0, 200) });
+    return;
+  }
+  shareLink(link, `Болею за ${t.name}! Матчи и таблица РХЛ`);
+}
+
+function shareLink(link, text) {
+  const url = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+  if (inTelegram) return tg.openTelegramLink(url);
+  if (navigator.share) return navigator.share({ title: "РХЛ", text, url: link }).catch(() => {});
+  window.open(url, "_blank", "noopener");
+}
+
 // ---------- карточка матча ----------
+
+let sheetOpener = null;   // куда вернуть фокус после закрытия карточки
 
 function openMatch(id) {
   const g = games().find((x) => x.id === id);
@@ -424,8 +529,9 @@ function openMatch(id) {
         html += `<div class="period"><span class="tag">${esc(PERIOD_NAMES[period] || period)}</span></div>`;
       }
       const tag = x.strength && x.strength !== "рав." ? `<span class="tag">${esc(x.strength.replace(".", ""))}</span>` : "";
-      html += `<div class="goal ${x.team}">
+      html += `<div class="goal">
         <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
+        ${emblem(x.team === "away" ? g.away : g.home)}
         <div class="who">${esc(x.author)}${tag}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
         <div class="sc">${esc(x.score)}</div>
       </div>`;
@@ -442,11 +548,17 @@ function openMatch(id) {
   if (g.score) html += `<dt>Источник счёта</dt><dd>протокол лиги</dd>`;
   html += `</dl></div>`;
 
+  showSheet(html);
+}
+
+function showSheet(html) {
   const sheet = $("#sheet");
   sheet.innerHTML = html;
   sheet.hidden = false;
   $("#sheet-backdrop").hidden = false;
   sheet.scrollTop = 0;
+  sheetOpener = document.activeElement;
+  sheet.querySelector("[data-close]").focus({ preventScroll: true });
   if (inTelegram) {
     tg.BackButton.show();
     if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
@@ -454,9 +566,12 @@ function openMatch(id) {
 }
 
 function closeMatch() {
+  if ($("#sheet").hidden) return;
   $("#sheet").hidden = true;
   $("#sheet-backdrop").hidden = true;
   if (inTelegram) tg.BackButton.hide();
+  if (sheetOpener && sheetOpener.isConnected) sheetOpener.focus({ preventScroll: true });
+  sheetOpener = null;
 }
 
 // ---------- бегущая строка ----------
@@ -484,12 +599,16 @@ function render() {
   const onboarding = !state.fav;
   $("#tabs").hidden = onboarding;
   if (onboarding) {
-    screen.innerHTML = renderPicker(true);
+    screen.innerHTML = renderOnboarding();
     addThemeToggle();
     return;
   }
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
-  const views = { home: renderHome, calendar: renderCalendar, table: renderTable, team: () => renderPicker(false) };
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === state.tab);
+    if (b.dataset.tab === state.tab) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  const views = { home: renderHome, calendar: renderCalendar, table: renderTable, me: renderMe };
   screen.innerHTML = views[state.tab]();
   addThemeToggle();
   const anchor = state.tab === "calendar" && !state.scrolledToNext && $("#next-anchor");
@@ -514,22 +633,30 @@ function go(tab) {
   render();
 }
 
-function confirmTeam() {
-  const id = state.draft || state.fav;
+function confirmTeam(id = state.draft || state.fav) {
   if (!id) return;
   state.fav = id;
   state.draft = null;
   state.cal = { team: id, side: "all" };
   state.conf = team(id).conf;
   saveFav(id);
+  closeMatch();
   state.tab = "home";
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render();
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],#sheet-backdrop");
   if (!el || el.disabled) return;
+  if (el.hasAttribute("data-switch-open")) return openTeamSheet();
+  if (el.dataset.switch) return confirmTeam(el.dataset.switch);
+  if (el.hasAttribute("data-story")) return shareStory();
+  if (el.hasAttribute("data-invite")) return shareLink(inviteLink(state.fav), `Болеем вместе за ${team(state.fav).name}: матчи, таблица и счёт РХЛ`);
+  if (el.hasAttribute("data-remind")) {
+    const url = `${state.data.links.bot}?start=remind`;
+    return inTelegram ? tg.openTelegramLink(url) : window.open(url, "_blank", "noopener");
+  }
   if (el.hasAttribute("data-theme-toggle")) return toggleTheme(el);
   if (el.dataset.themePick) {
     lsSet(THEME_KEY, el.dataset.themePick);
@@ -567,6 +694,15 @@ document.addEventListener("click", (e) => {
     state.scrolledToNext = false;
     state.tab = "calendar";
     return render();
+  }
+});
+
+// Строки и карточки с role="button" нажимаются с клавиатуры, Esc закрывает карточку матча
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") return closeMatch();
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) {
+    e.preventDefault();
+    e.target.click();
   }
 });
 

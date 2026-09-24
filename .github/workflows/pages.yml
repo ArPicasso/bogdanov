@@ -45,7 +45,11 @@ jobs:
         continue-on-error: true
         run: python league.py --site "${{ vars.LEAGUE_SITE }}"
 
+      # Ссылки на бота и мини-апп (ADR-004): Settings → Variables → BOT_LINK, APP_LINK
       - name: Собрать данные
+        env:
+          BOT_LINK: ${{ vars.BOT_LINK }}
+          APP_LINK: ${{ vars.APP_LINK }}
         run: python build_data.py
 
       - uses: actions/upload-pages-artifact@v3
