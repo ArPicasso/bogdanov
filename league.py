@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -16,7 +17,6 @@ TZ = ZoneInfo("Europe/Moscow")
 RESULTS_FILE = BASE / "results.json"
 SETTLE_DAYS = 3   # столько дней после матча протокол ещё перезапрашиваем: лига может его поправить
 DEFAULT_SITE = "https://nmhl.fhr.ru"
-DEFAULT_CLUB = "Рязань-ВДВ"
 USER_AGENT = "ryazan-vdv-schedule-bot (+https://github.com/ArPicasso/bogdanov)"
 PAUSE = 1.0
 
@@ -232,33 +232,38 @@ async def _get(session: aiohttp.ClientSession, url: str) -> str:
         return await r.text()
 
 
-async def fetch_protocols(site: str, tournament: int | None = None, club: str = DEFAULT_CLUB,
+async def fetch_protocols(site: str, tournament: int | None = None, club: str | None = None,
                           skip: set[int] = frozenset()) -> tuple[int, list[Protocol]]:
-    """Скачивает протоколы клуба за турнир. Запросы идут по одному с паузой."""
+    """Протоколы турнира: всей лиги или одного клуба. Запросы идут по одному с паузой."""
     headers = {"User-Agent": USER_AGENT}
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(headers=headers, timeout=timeout, trust_env=True) as s:
-        page = await _get(s, f"{site}/calendar/")
         if tournament is None:
-            regular = [i for i, name in parse_tournaments(page) if "Регулярный" in name]
+            regular = [i for i, name in parse_tournaments(await _get(s, f"{site}/calendar/"))
+                       if "Регулярный" in name]
             if not regular:
                 raise RuntimeError("не нашёл регулярный чемпионат в календаре лиги")
             tournament = regular[0]
             await asyncio.sleep(PAUSE)
-            page = await _get(s, f"{site}/calendar/{tournament}/")
-        clubs = {name: cid for name, cid in parse_club_ids(page, tournament).items() if club in name}
-        if len(clubs) != 1:
-            raise RuntimeError(f"клуб «{club}» в турнире {tournament}: найдено {list(clubs)}")
-        await asyncio.sleep(PAUSE)
-        cal = await _get(s, f"{site}/calendar/{tournament}/0/{next(iter(clubs.values()))}/")
+        cal = await _get(s, f"{site}/calendar/{tournament}/")
+        if club:
+            clubs = {name: cid for name, cid in parse_club_ids(cal, tournament).items() if club in name}
+            if len(clubs) != 1:
+                raise RuntimeError(f"клуб «{club}» в турнире {tournament}: найдено {list(clubs)}")
+            await asyncio.sleep(PAUSE)
+            cal = await _get(s, f"{site}/calendar/{tournament}/0/{next(iter(clubs.values()))}/")
 
         protocols = []
         for gid in parse_game_ids(cal, tournament):
             if gid in skip:
                 continue
             await asyncio.sleep(PAUSE)
-            p = parse_protocol(await _get(s, f"{site}/report/{tournament}/?idgame={gid}"), gid)
-            if p and (club in p.home or club in p.away):
+            try:
+                p = parse_protocol(await _get(s, f"{site}/report/{tournament}/?idgame={gid}"), gid)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logging.warning("протокол %s не скачался: %s", gid, e)
+                continue
+            if p and (not club or club in p.home or club in p.away):
                 protocols.append(p)
         return tournament, protocols
 
@@ -280,7 +285,7 @@ def save_results(results: Results, path: Path = RESULTS_FILE) -> None:
     tmp.replace(path)
 
 
-async def update_results(site: str, tournament: int | None, club: str, path: Path) -> list[Protocol]:
+async def update_results(site: str, tournament: int | None, club: str | None, path: Path) -> list[Protocol]:
     results = load_results(path)
     settled = datetime.now(TZ).date() - timedelta(days=SETTLE_DAYS)
     known = {r["game_id"] for games in results.values() for r in games.values()
@@ -294,10 +299,11 @@ async def update_results(site: str, tournament: int | None, club: str, path: Pat
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Скачать протоколы матчей клуба с сайта лиги в results.json")
+    logging.basicConfig(level=logging.INFO)
+    ap = argparse.ArgumentParser(description="Скачать протоколы матчей с сайта лиги в results.json")
     ap.add_argument("--site", default=DEFAULT_SITE)
     ap.add_argument("--tournament", type=int, help="id турнира; по умолчанию — последний регулярный чемпионат")
-    ap.add_argument("--club", default=DEFAULT_CLUB, help="часть названия клуба")
+    ap.add_argument("--club", help="часть названия клуба; по умолчанию — вся лига")
     ap.add_argument("--out", type=Path, default=RESULTS_FILE)
     args = ap.parse_args()
     fresh = asyncio.run(update_results(args.site, args.tournament, args.club, args.out))

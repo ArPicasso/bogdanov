@@ -4,3 +4,4 @@ __pycache__/
 subscribers.json
 results.json
 results.tmp
+webapp/data/
