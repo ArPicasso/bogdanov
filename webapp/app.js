@@ -1,29 +1,39 @@
 "use strict";
+// Интерфейс — по DESIGN.md. Всё, что пришло из данных, вставляется только через esc().
 
 const tg = window.Telegram && window.Telegram.WebApp;
 const inTelegram = !!(tg && tg.initData);
 const TZ = "Europe/Moscow";
 const FAV_KEY = "fav_team";
+const CANVAS = "#08090a";
 
-const DOW = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+const DOW = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const MON_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 const CONF = { east: "Восток", west: "Запад" };
 const PLAYOFF_CUT = 8;
+const PERIOD_NAMES = { "1": "1-й период", "2": "2-й период", "3": "3-й период", "ОТ": "Овертайм", "РБ": "Буллиты" };
+
+const ICON = {
+  home: '<svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>',
+  away: '<svg viewBox="0 0 24 24"><path d="M3 12h13M12 6l6 6-6 6"/></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+};
 
 const state = {
   data: null,
   teams: {},
   fav: null,
+  draft: null,
   tab: "home",
   cal: { team: null, side: "all" },
-  conf: null,
-  scrolledToToday: false,
+  conf: "east",
+  scrolledToNext: false,
 };
 
 const $ = (sel) => document.querySelector(sel);
 
-// Всё, что пришло из данных, вставляется только через esc(): названия и фамилии — со сторонних сайтов.
 function esc(v) {
   return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -58,6 +68,10 @@ function fmtLong(iso) {
   const d = parseISO(iso);
   return `${DOW[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS_GEN[d.getUTCMonth()]}`;
 }
+function fmtShort(iso) {
+  const d = parseISO(iso);
+  return `${DOW[d.getUTCDay()]} ${String(d.getUTCDate()).padStart(2, "0")} ${MON_SHORT[d.getUTCMonth()]}`;
+}
 
 // ---------- хранилище любимой команды ----------
 
@@ -78,10 +92,11 @@ function saveFav(id) {
 
 // ---------- выборки ----------
 
-const team = (id) => state.teams[id] || { name: id, city: "" };
+const team = (id) => state.teams[id] || { id, abbr: "?", name: id, city: "" };
 const games = () => state.data.games;
 const gamesOf = (id) => games().filter((g) => g.home === id || g.away === id);
-const nextGame = (id) => gamesOf(id).find((g) => !g.score && g.date >= todayISO());
+const isUpcoming = (g) => !g.score && g.date >= todayISO();
+const nextGame = (id) => gamesOf(id).find(isUpcoming);
 const lastPlayed = (id) => gamesOf(id).filter((g) => g.score).pop();
 
 function standingOf(id) {
@@ -98,37 +113,61 @@ function outcomeFor(g, me) {
   const their = g.home === me ? g.score.away : g.score.home;
   return mine > their ? "w" : "l";
 }
-const decLabel = (s) => (s.decision === "ОТ" ? "ОТ" : s.decision === "Б" ? "Б" : "");
 
 // ---------- элементы ----------
 
-function teamLabel(id) {
-  const cls = id === state.fav ? ' class="me"' : "";
-  return `<span${cls}>${esc(team(id).name)}</span>`;
+function tile(id, size) {
+  const me = id === state.fav ? " me" : "";
+  return `<span class="tile${size ? " " + size : ""}${me}" aria-hidden="true">${esc(team(id).abbr)}</span>`;
 }
 
-function gameRow(g) {
-  const d = parseISO(g.date);
+function outcomeBadge(g) {
   const res = outcomeFor(g, state.fav);
-  let right;
+  if (!res) return "";
+  return `<span class="badge ${res}">${res === "w" ? "В" : "П"}${g.score.decision ? " " + esc(g.score.decision) : ""}</span>`;
+}
+
+function whereBadge(g, me) {
+  if (me !== g.home && me !== g.away) return "";
+  return g.home === me ? `<span class="badge">${ICON.home}Дома</span>` : `<span class="badge">${ICON.away}Выезд</span>`;
+}
+
+function board(g) {
+  const side = (id) => `<div class="side">${tile(id, "lg")}<div class="name${id === state.fav ? " me" : ""}">${esc(team(id).name)}</div><div class="city">${esc(team(id).city)}</div></div>`;
+  let mid;
   if (g.score) {
-    right = `<div class="s ${res}">${g.score.home}:${g.score.away}${decLabel(g.score) ? `<small>${decLabel(g.score)}</small>` : ""}</div>`;
+    const dec = g.score.decision === "ОТ" ? "овертайм" : g.score.decision === "Б" ? "буллиты" : "финал";
+    mid = `<div class="score">${g.score.home}:${g.score.away}<span class="dec">${dec}</span></div>`;
   } else {
-    right = `<div class="s"><small>${g.time ? esc(g.time) : ""}</small></div>`;
+    mid = `<div class="score pending">${g.time ? esc(g.time) : "—"}<span class="kick">${until(g.date)}</span></div>`;
   }
-  return `<div class="row${g.score ? " past" : ""}" data-game="${esc(g.id)}">
-    <div class="d"><b>${d.getUTCDate()}</b>${DOW[d.getUTCDay()]}</div>
-    <div class="t"><div>${teamLabel(g.home)}</div><div>${teamLabel(g.away)}</div></div>
-    ${right}
+  return `<div class="board">${side(g.home)}${mid}${side(g.away)}</div>`;
+}
+
+function periodsLine(g) {
+  if (!g.score || !g.score.periods || !g.score.periods.length) return "";
+  return `<div class="periods">${g.score.periods.map((p) => `<span>${p[0]}:${p[1]}</span>`).join("")}</div>`;
+}
+
+function gameRow(g, next) {
+  const d = parseISO(g.date);
+  const past = !!g.score;
+  const goals = (id) => (past ? `<span class="gl${(id === g.home ? g.score.home > g.score.away : g.score.away > g.score.home) ? " lead" : ""}">${id === g.home ? g.score.home : g.score.away}</span>` : "");
+  const line = (id) => `<div>${tile(id, "sm")}<span class="nm${id === state.fav ? " me" : ""}">${esc(team(id).name)}</span>${goals(id)}</div>`;
+  let right = "";
+  if (past) right = outcomeBadge(g) || (g.score.decision ? `<span class="badge">${esc(g.score.decision)}</span>` : "");
+  else right = `<span class="when-mono">${g.time ? esc(g.time) : "—"}</span>`;
+  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}"${next ? ' id="next-anchor"' : ""}>
+    <div class="d"><b>${String(d.getUTCDate()).padStart(2, "0")}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
+    <div class="t">${line(g.home)}${line(g.away)}</div>
+    <div class="r">${right}</div>
   </div>`;
 }
 
-function vsBlock(g) {
-  const mid = g.score
-    ? `${g.score.home}:${g.score.away}${decLabel(g.score) ? `<span class="dec">${g.score.decision === "ОТ" ? "овертайм" : "буллиты"}</span>` : ""}`
-    : `<span class="sub">${g.time ? esc(g.time) : "—"}</span>`;
-  const side = (id) => `<div class="team">${teamLabel(id)}<span class="city">${esc(team(id).city)}</span></div>`;
-  return `<div class="vs">${side(g.home)}<div class="mid">${mid}</div>${side(g.away)}</div>`;
+function footer() {
+  const upd = state.data.updated ? new Date(state.data.updated) : null;
+  const when = upd ? upd.toLocaleString("ru-RU", { timeZone: TZ, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "";
+  return `<div class="foot">${esc(state.data.league)} · сезон ${esc(state.data.season)}${when ? `<br>Обновлено ${esc(when)} МСК` : ""}</div>`;
 }
 
 // ---------- экраны ----------
@@ -137,39 +176,57 @@ function renderHome() {
   const me = state.fav;
   const t = team(me);
   const st = standingOf(me);
+  const mine = gamesOf(me);
   const next = nextGame(me);
   const last = lastPlayed(me);
-  const upcoming = gamesOf(me).filter((g) => !g.score && g.date >= todayISO()).slice(1, 4);
+  const upcoming = mine.filter(isUpcoming).slice(1, 4);
 
-  let html = `<h1>${esc(t.name)}</h1><div class="sub">${esc(t.city)}`;
-  if (st && st.row.gp) html += ` · ${st.place} место, ${CONF[st.conf]} · ${st.row.pts} ${plural(st.row.pts, "очко", "очка", "очков")}`;
-  html += `</div>`;
+  let html = `<div class="teamhead">${tile(me)}<div><h1>${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>`;
+
+  if (st && st.row.gp) {
+    const form = st.row.form.length ? `<span class="form">${st.row.form.map((f) => `<i class="${f}"></i>`).join("")}</span>` : "—";
+    html += `<div class="stats">
+      <div><b>${st.place}</b><span>место · ${CONF[st.conf]}</span></div>
+      <div><b>${st.row.pts}</b><span>${plural(st.row.pts, "очко", "очка", "очков")} · ${st.row.gp} ${plural(st.row.gp, "игра", "игры", "игр")}</span></div>
+      <div><b>${form}</b><span>форма</span></div>
+    </div>`;
+  } else if (next) {
+    const home = mine.filter((g) => g.home === me).length;
+    html += `<div class="stats">
+      <div><b>${mine.length}</b><span>матчей</span></div>
+      <div><b>${home} / ${mine.length - home}</b><span>дома / выезд</span></div>
+      <div><b>${Math.max(daysFromToday(mine[0].date), 0)}</b><span>${plural(Math.max(daysFromToday(mine[0].date), 0), "день", "дня", "дней")} до старта</span></div>
+    </div>`;
+  }
 
   if (next) {
-    const where = next.home === me ? "🏠 Дома" : "✈️ На выезде";
-    html += `<h2>Следующий матч</h2>
-      <div class="card hero tap" data-game="${esc(next.id)}">
-        <div class="when"><span>${fmtLong(next.date)} · ${where}</span><b>${until(next.date)}</b></div>
-        ${vsBlock(next)}
-        ${next.official ? "" : `<div class="sub" style="text-align:center"><span class="badge warn">дата предварительная</span></div>`}
+    const today = daysFromToday(next.date) === 0;
+    html += `<div class="eyebrow">Следующий матч${next.n ? `<span class="aside mono">№ ${esc(next.n)}</span>` : ""}</div>
+      <div class="card tap" data-game="${esc(next.id)}">
+        <div class="board-top">
+          <span style="display:flex;gap:6px">${whereBadge(next, me)}${next.official ? "" : '<span class="badge">предварительно</span>'}</span>
+          ${today ? '<span class="badge now">Сегодня</span>' : `<span class="when-mono">${esc(fmtShort(next.date))}</span>`}
+        </div>
+        ${board(next)}
       </div>`;
   } else {
-    html += `<div class="card empty">Матчей регулярного чемпионата больше нет</div>`;
+    html += `<div class="eyebrow">Следующий матч</div><div class="card empty">Матчей регулярного чемпионата больше нет</div>`;
   }
 
   if (last) {
-    html += `<h2>Последний результат</h2>
-      <div class="card hero tap" data-game="${esc(last.id)}">
-        <div class="when"><span>${fmtLong(last.date)}</span><span>${until(last.date)}</span></div>
-        ${vsBlock(last)}
+    html += `<div class="eyebrow">Последний результат</div>
+      <div class="card tap" data-game="${esc(last.id)}">
+        <div class="board-top"><span style="display:flex;gap:6px">${whereBadge(last, me)}${outcomeBadge(last)}</span><span class="when-mono">${esc(fmtShort(last.date))}</span></div>
+        ${board(last)}
+        ${periodsLine(last)}
       </div>`;
   }
 
   if (upcoming.length) {
-    html += `<h2>Дальше</h2><div class="list">${upcoming.map(gameRow).join("")}</div>`;
+    html += `<div class="eyebrow">Дальше<span class="aside" data-tab="calendar" style="cursor:pointer">Весь календарь →</span></div>
+      <div class="list">${upcoming.map((g) => gameRow(g, false)).join("")}</div>`;
   }
-  html += footer();
-  return html;
+  return html + footer();
 }
 
 function renderCalendar() {
@@ -178,95 +235,88 @@ function renderCalendar() {
   if (teamId && state.cal.side !== "all") {
     list = list.filter((g) => (state.cal.side === "home" ? g.home === teamId : g.away === teamId));
   }
-
+  const other = teamId && teamId !== state.fav;
   const opts = state.data.teams
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, "ru"))
-    .map((t) => `<option value="${esc(t.id)}"${t.id === teamId ? " selected" : ""}>${esc(t.name)}</option>`)
+    .map((t) => `<option value="${esc(t.id)}"${t.id === teamId && other ? " selected" : ""}>${esc(t.name)}</option>`)
     .join("");
 
-  let html = `<div class="chips">
-      <button class="chip${teamId === state.fav ? " on" : ""}" data-cal-team="${esc(state.fav)}">Моя команда</button>
-      <button class="chip${!teamId ? " on" : ""}" data-cal-team="">Вся лига</button>
-      <select class="chip${teamId && teamId !== state.fav ? " on" : ""}" id="cal-team-select">
-        <option value="">Другая команда…</option>${opts}
-      </select>
+  let html = `<div class="seg" role="tablist">
+      <button class="${teamId === state.fav ? "on" : ""}" data-cal-team="${esc(state.fav)}">Моя команда</button>
+      <button class="${!teamId ? "on" : ""}" data-cal-team="">Вся лига</button>
+      <select class="${other ? "on" : ""}" id="cal-team-select" aria-label="Другая команда"><option value="">Другая…</option>${opts}</select>
     </div>`;
   if (teamId) {
-    html += `<div class="chips">${[["all", "Все"], ["home", "Дома"], ["away", "Выезд"]]
-      .map(([k, v]) => `<button class="chip${state.cal.side === k ? " on" : ""}" data-cal-side="${k}">${v}</button>`)
+    html += `<div class="seg sm">${[["all", "Все"], ["home", "Дома"], ["away", "Выезд"]]
+      .map(([k, v]) => `<button class="${state.cal.side === k ? "on" : ""}" data-cal-side="${k}">${v}</button>`)
       .join("")}</div>`;
   }
 
+  const nextId = (list.find(isUpcoming) || {}).id;
   let month = "";
-  let open = false;
-  const today = todayISO();
-  let todayMarked = false;
   for (const g of list) {
     const m = g.date.slice(0, 7);
     if (m !== month) {
-      if (open) html += `</div>`;
+      if (month) html += `</div>`;
       const d = parseISO(g.date);
-      html += `<h2>${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}</h2><div class="list">`;
+      const count = list.filter((x) => x.date.slice(0, 7) === m).length;
+      html += `<div class="eyebrow">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">`;
       month = m;
-      open = true;
     }
-    if (!todayMarked && g.date >= today) {
-      html += `<span id="today-anchor"></span>`;
-      todayMarked = true;
-    }
-    html += gameRow(g);
+    html += gameRow(g, g.id === nextId);
   }
-  if (open) html += `</div>`;
+  if (month) html += `</div>`;
   if (!list.length) html += `<div class="card empty">Матчей нет</div>`;
-  html += `<div class="foot">Официальный календарь пока есть только у «Рязань-ВДВ». Даты остальных матчей — предварительные, уточним после открытия сайта РХЛ.</div>`;
+  html += `<div class="foot">Официальный календарь ФХР пока есть только у «Рязань-ВДВ». Остальные даты — предварительные, уточним после открытия сайта РХЛ.</div>`;
   return html;
 }
 
 function renderTable() {
   const conf = state.conf;
   const rows = state.data.standings[conf] || [];
-  let html = `<div class="chips">${Object.entries(CONF)
-    .map(([k, v]) => `<button class="chip${conf === k ? " on" : ""}" data-conf="${k}">${v}</button>`)
+  let html = `<div class="seg">${Object.entries(CONF)
+    .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}">${v}</button>`)
     .join("")}</div>`;
-  html += `<table class="st"><thead><tr><th class="n">#</th><th class="team">Команда</th><th>И</th><th>В</th><th>П</th><th>Ш</th><th>О</th></tr></thead><tbody>`;
+  html += `<div class="st"><div class="st-row head"><span class="pos">#</span><span class="tm">Команда</span><span>И</span><span>В</span><span>П</span><span>Ш</span><span>О</span></div>`;
   rows.forEach((r, i) => {
+    if (i === PLAYOFF_CUT) html += `<div class="cut">Зона плей-офф выше</div>`;
     const wins = r.w + r.otw + r.sow;
     const losses = r.l + r.otl + r.sol;
-    const cls = [r.team === state.fav ? "fav" : "", i === PLAYOFF_CUT ? "cut" : ""].filter(Boolean).join(" ");
-    html += `<tr class="${cls}" data-team="${esc(r.team)}">
-      <td class="n">${i + 1}</td>
-      <td class="team">${esc(team(r.team).name)}</td>
-      <td>${r.gp}</td><td>${wins}</td><td>${losses}</td><td>${r.gf}:${r.ga}</td><td class="pts">${r.pts}</td>
-    </tr>`;
+    html += `<div class="st-row${r.team === state.fav ? " me" : ""}" data-team="${esc(r.team)}">
+      <span class="pos">${i + 1}</span>
+      <span class="tm">${tile(r.team, "sm")}<span>${esc(team(r.team).name)}</span></span>
+      <span class="num">${r.gp}</span><span class="num">${wins}</span><span class="num">${losses}</span>
+      <span class="num">${r.gf}:${r.ga}</span><span class="pts">${r.pts}</span>
+    </div>`;
   });
-  html += `</tbody></table>`;
+  html += `</div>`;
   const played = rows.some((r) => r.gp);
-  html += `<div class="foot">${played ? "Победа — 2 очка, поражение в овертайме или по буллитам — 1. В плей-офф выходят 8 команд конференции." : "Сезон начнётся 3 октября — таблица заполнится после первых матчей."}</div>`;
+  html += `<div class="foot">${played
+    ? "Победа — 2 очка, поражение в овертайме или по буллитам — 1. В плей-офф выходят 8 команд конференции."
+    : "Сезон стартует 3 октября — таблица заполнится после первых матчей."}</div>`;
   return html;
 }
 
-function renderTeamPicker(onboarding) {
+function renderPicker(onboarding) {
+  const chosen = state.draft || state.fav;
   let html = onboarding
-    ? `<h1>За кого болеете?</h1><div class="sub">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div>`
-    : `<h1>Моя команда</h1><div class="sub">Сейчас: ${esc(team(state.fav).name)}</div>`;
+    ? `<h1>За кого болеете?</h1><div class="meta" style="margin-top:6px">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div>`
+    : `<h1>Моя команда</h1><div class="meta" style="margin-top:6px">Сейчас: ${esc(team(state.fav).name)}</div>`;
   for (const conf of ["east", "west"]) {
-    html += `<h2>${CONF[conf]}</h2><div class="grid">`;
-    state.data.teams
-      .filter((t) => t.conf === conf)
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"))
-      .forEach((t) => {
-        html += `<button class="pick${t.id === state.fav ? " on" : ""}" data-pick="${esc(t.id)}"><b>${esc(t.name)}</b><span>${esc(t.city)}</span></button>`;
-      });
+    const list = state.data.teams.filter((t) => t.conf === conf).sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    html += `<div class="eyebrow">${CONF[conf]}<span class="aside">${list.length} команд</span></div><div class="picker">`;
+    for (const t of list) {
+      html += `<button class="pick${t.id === chosen ? " on" : ""}" data-pick="${esc(t.id)}" aria-pressed="${t.id === chosen}">
+        <span class="tile">${esc(t.abbr)}</span><div><b>${esc(t.name)}</b><small>${esc(t.city)}</small></div></button>`;
+    }
     html += `</div>`;
   }
+  const changed = chosen && chosen !== state.fav;
+  const label = onboarding ? (chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду") : changed ? `Сохранить — ${esc(team(chosen).name)}` : "Команда выбрана";
+  html += `<div style="height:72px"></div><div class="cta-bar${onboarding ? "" : " above-nav"}">
+    <button class="btn-primary" data-confirm${(onboarding ? chosen : changed) ? "" : " disabled"}>${label}</button></div>`;
   return html;
-}
-
-function footer() {
-  const upd = state.data.updated ? new Date(state.data.updated) : null;
-  const when = upd ? upd.toLocaleString("ru-RU", { timeZone: TZ, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "";
-  return `<div class="foot">${esc(state.data.league)}, сезон ${esc(state.data.season)}${when ? `<br>Данные обновлены ${esc(when)} (МСК)` : ""}</div>`;
 }
 
 // ---------- карточка матча ----------
@@ -275,31 +325,35 @@ function openMatch(id) {
   const g = games().find((x) => x.id === id);
   if (!g) return;
   let html = `<div class="grab"></div>
-    <div class="sheet-head"><div class="sub">${fmtLong(g.date)} ${parseISO(g.date).getUTCFullYear()} · ${until(g.date)}</div>
-    <button class="close" data-close aria-label="Закрыть">✕</button></div>
-    <div class="card">${vsBlock(g)}`;
-  if (g.score && g.score.periods && g.score.periods.length) {
-    html += `<div class="periods">${g.score.periods.map((p) => `${p[0]}:${p[1]}`).join(" · ")}</div>`;
-  }
-  html += `</div>`;
+    <div class="sheet-head"><span class="when-mono">${esc(fmtLong(g.date))} ${parseISO(g.date).getUTCFullYear()} · ${esc(until(g.date))}</span>
+    <button class="btn-ghost" data-close aria-label="Закрыть">${ICON.close}</button></div>
+    <div class="card">${board(g)}${periodsLine(g)}</div>`;
 
   if (g.goals && g.goals.length) {
-    html += `<h2>Голы</h2><div class="list">${g.goals
-      .map((x) => `<div class="goal ${x.team}">
-          <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
-          <div class="who">${esc(x.author)}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
-          <div class="sc">${esc(x.score)}</div>
-        </div>`)
-      .join("")}</div>`;
+    html += `<div class="eyebrow">Голы<span class="aside">${g.goals.length}</span></div><div class="goals">`;
+    let period = null;
+    for (const x of g.goals) {
+      if (x.period !== period) {
+        period = x.period;
+        html += `<div class="period">${esc(PERIOD_NAMES[period] || period)}</div>`;
+      }
+      const tag = x.strength && x.strength !== "рав." ? `<span class="badge">${esc(x.strength.replace(".", ""))}</span>` : "";
+      html += `<div class="goal ${x.team}">
+        <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
+        <div class="who">${esc(x.author)}${tag}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
+        <div class="sc">${esc(x.score)}</div>
+      </div>`;
+    }
+    html += `</div>`;
   }
 
-  html += `<h2>О матче</h2><div class="card"><dl class="facts">`;
-  if (g.n) html += `<dt>Матч</dt><dd>№ ${esc(g.n)} в календаре лиги</dd>`;
-  html += `<dt>Где</dt><dd>${esc(team(g.home).city)}</dd>`;
-  if (g.time) html += `<dt>Начало</dt><dd>${esc(g.time)} (местное)</dd>`;
-  if (g.attendance) html += `<dt>Зрители</dt><dd>${esc(g.attendance)}</dd>`;
-  html += `<dt>Календарь</dt><dd>${g.official ? "официальный, ФХР" : '<span class="badge warn">предварительный</span>'}</dd>`;
-  if (g.score) html += `<dt>Счёт</dt><dd>по протоколу лиги</dd>`;
+  html += `<div class="eyebrow">О матче</div><div class="card"><dl class="facts">`;
+  if (g.n) html += `<dt>Номер</dt><dd class="mono">№ ${esc(g.n)}</dd>`;
+  html += `<dt>Город</dt><dd>${esc(team(g.home).city)}</dd>`;
+  if (g.time) html += `<dt>Начало</dt><dd class="mono">${esc(g.time)} местное</dd>`;
+  if (g.attendance) html += `<dt>Зрители</dt><dd>${esc(Number(g.attendance).toLocaleString("ru-RU"))}</dd>`;
+  html += `<dt>Календарь</dt><dd>${g.official ? "ФХР, официальный" : '<span class="badge">предварительно</span>'}</dd>`;
+  if (g.score) html += `<dt>Источник счёта</dt><dd>протокол лиги</dd>`;
   html += `</dl></div>`;
 
   const sheet = $("#sheet");
@@ -307,7 +361,10 @@ function openMatch(id) {
   sheet.hidden = false;
   $("#sheet-backdrop").hidden = false;
   sheet.scrollTop = 0;
-  if (inTelegram) tg.BackButton.show();
+  if (inTelegram) {
+    tg.BackButton.show();
+    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+  }
 }
 
 function closeMatch() {
@@ -323,62 +380,78 @@ function render() {
   const onboarding = !state.fav;
   $("#tabs").hidden = onboarding;
   if (onboarding) {
-    screen.innerHTML = renderTeamPicker(true);
+    screen.innerHTML = renderPicker(true);
     return;
   }
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
-  const views = { home: renderHome, calendar: renderCalendar, table: renderTable, team: () => renderTeamPicker(false) };
+  const views = { home: renderHome, calendar: renderCalendar, table: renderTable, team: () => renderPicker(false) };
   screen.innerHTML = views[state.tab]();
-  if (state.tab === "calendar" && !state.scrolledToToday) {
-    const a = $("#today-anchor");
-    if (a) a.scrollIntoView({ block: "center" });
-    state.scrolledToToday = true;
-  } else {
+  const anchor = state.tab === "calendar" && !state.scrolledToNext && $("#next-anchor");
+  if (anchor) {
+    anchor.scrollIntoView({ block: "center" });
+    state.scrolledToNext = true;
+  } else if (state.tab !== "calendar") {
     window.scrollTo(0, 0);
   }
+}
+
+function haptic() {
+  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
 }
 
 function go(tab) {
   if (tab === state.tab) return;
   state.tab = tab;
-  if (tab === "calendar") state.scrolledToToday = false;
-  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+  state.draft = null;
+  if (tab === "calendar") state.scrolledToNext = false;
+  haptic();
   render();
 }
 
-function setFav(id) {
+function confirmTeam() {
+  const id = state.draft || state.fav;
+  if (!id) return;
   state.fav = id;
-  state.cal.team = id;
+  state.draft = null;
+  state.cal = { team: id, side: "all" };
   state.conf = team(id).conf;
   saveFav(id);
   state.tab = "home";
+  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render();
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-close],#sheet-backdrop");
-  if (!el) return;
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-close],#sheet-backdrop");
+  if (!el || el.disabled) return;
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
+  if (el.hasAttribute("data-confirm")) return confirmTeam();
   if (el.dataset.tab) return go(el.dataset.tab);
   if (el.dataset.game) return openMatch(el.dataset.game);
-  if (el.dataset.pick) return setFav(el.dataset.pick);
+  if (el.dataset.pick) {
+    state.draft = el.dataset.pick;
+    haptic();
+    return render();
+  }
   if (el.dataset.calTeam !== undefined) {
-    state.cal.team = el.dataset.calTeam || null;
-    state.cal.side = "all";
-    state.scrolledToToday = false;
+    state.cal = { team: el.dataset.calTeam || null, side: "all" };
+    state.scrolledToNext = false;
+    haptic();
     return render();
   }
   if (el.dataset.calSide) {
     state.cal.side = el.dataset.calSide;
+    haptic();
     return render();
   }
   if (el.dataset.conf) {
     state.conf = el.dataset.conf;
+    haptic();
     return render();
   }
   if (el.dataset.team) {
     state.cal = { team: el.dataset.team, side: "all" };
-    state.scrolledToToday = false;
+    state.scrolledToNext = false;
     state.tab = "calendar";
     return render();
   }
@@ -387,7 +460,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("change", (e) => {
   if (e.target.id === "cal-team-select" && e.target.value) {
     state.cal = { team: e.target.value, side: "all" };
-    state.scrolledToToday = false;
+    state.scrolledToNext = false;
     render();
   }
 });
@@ -402,9 +475,13 @@ function startParam() {
 
 async function main() {
   if (inTelegram) {
-    document.documentElement.classList.add("tg");
     tg.ready();
     tg.expand();
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.1")) {
+      tg.setHeaderColor(CANVAS);
+      tg.setBackgroundColor(CANVAS);
+    }
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(CANVAS);
     tg.BackButton.onClick(closeMatch);
   }
   try {
@@ -425,8 +502,6 @@ async function main() {
     state.cal.team = fav;
     state.conf = state.teams[fav].conf;
     if (fromLink === fav && fav !== saved) saveFav(fav);
-  } else {
-    state.conf = "east";
   }
   render();
 }
