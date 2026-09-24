@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
                            InlineKeyboardMarkup, KeyboardButton, MenuButtonWebApp, Message,
                            ReplyKeyboardMarkup, WebAppInfo)
@@ -192,7 +192,11 @@ async def safe_edit(c: CallbackQuery, text: str, reply_markup: InlineKeyboardMar
 
 
 @dp.message(CommandStart())
-async def start(m: Message):
+async def start(m: Message, command: CommandObject):
+    if command.args == "remind":   # из мини-аппа, экран «Я» (ADR-004)
+        await m.answer(remind_text(m.chat.id), reply_markup=remind_kb(m.chat.id))
+        await m.answer("Кнопки расписания — внизу.", reply_markup=MAIN_KB)
+        return
     await m.answer("Расписание МХК «Рязань-ВДВ», РХЛ 2026/27 🏒\nЖми кнопки внизу.\n\n"
                    + next_game_text(), reply_markup=MAIN_KB)
     if WEBAPP_URL:

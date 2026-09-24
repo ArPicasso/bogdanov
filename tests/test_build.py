@@ -92,3 +92,12 @@ class Standings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Links(unittest.TestCase):
+    def test_only_telegram_links(self):
+        env = {"BOT_LINK": "https://t.me/rhl_bot/", "APP_LINK": "http://evil.example/app"}
+        self.assertEqual(b.links(env), {"bot": "https://t.me/rhl_bot"})
+
+    def test_empty(self):
+        self.assertEqual(b.links({}), {})

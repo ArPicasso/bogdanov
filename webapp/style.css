@@ -498,8 +498,7 @@ h1, .display {
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; text-align: right; font-weight: 700; }
 
-.band-label { margin-top: 18px; font: 700 12px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; }
-.band-label + .pills { margin-top: 8px; }
+.label + .theme-pills { margin-top: 0; }
 
 /* Тёмная тема: приглушённые версии ярких декоративных цветов */
 :root[data-theme="dark"] .em.ab { background: #3a3470; color: #dcd6ff; }
@@ -554,3 +553,71 @@ h1, .display {
 @media (prefers-reduced-motion: reduce) {
   :root.theme-anim, :root.theme-anim * { transition: none !important; }
 }
+
+/* ---------- экран «Я»: паспорт болельщика (ADR-004) ---------- */
+
+:root {
+  --pass-bg: var(--violet);
+  --pass-fg: #ffffff;
+  --pass-edge: var(--edge);
+}
+:root[data-theme="dark"] {
+  --pass-bg: #272650;
+  --pass-fg: #dcd6ff;
+  --pass-edge: rgba(92, 74, 222, .55);
+}
+
+/* Имя в шапке: кегль по самому длинному слову, 84px — поля полосы и кнопка темы */
+h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) * 0.9)), 30px); }
+
+.hero-em { flex: none; padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+.hero-em:active .em { transform: rotate(-6deg) scale(.94); }
+
+.passport {
+  position: relative;
+  border: 1px solid var(--pass-edge);
+  border-radius: 28px;
+  padding: 16px 16px 16px;
+  background: var(--pass-bg);
+  color: var(--pass-fg);
+}
+.pp-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.pp-tag {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 11px;
+  border: var(--line); border-radius: 9999px; background: var(--paper); color: var(--ink);
+  font: 700 11px/1 var(--ui); letter-spacing: .05em; text-transform: uppercase;
+}
+.pp-star { width: 40px; height: 40px; margin: -6px -4px 0 0; transform: rotate(14deg); fill: var(--sun); stroke: #000; stroke-width: 5; stroke-linejoin: round; }
+.pp-main { display: flex; align-items: center; gap: 16px; margin-top: 10px; }
+.pp-name { min-width: 0; }
+.pp-name small { display: block; font: 700 12px/1.2 var(--ui); letter-spacing: .05em; text-transform: uppercase; }
+/* 164px — поля экрана и карточки, эмблема и зазор */
+.pp-name b { display: block; margin-top: 6px; font: 800 clamp(18px, calc((min(100vw, 560px) - 164px) / (var(--w, 8) * 0.9)), 34px)/0.92 var(--display); letter-spacing: -0.01em; }
+.pp-meta { margin-top: 14px; font: 500 13px/1.3 var(--ui); }
+.pp-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  margin-top: 14px; border: var(--line); border-radius: 20px; background: var(--paper); color: var(--ink);
+}
+.pp-stats .stat { border: 0; border-radius: 0; background: none; padding: 12px 12px 10px; }
+.pp-stats .stat + .stat { border-left: 1px solid var(--mist); }
+.pp-stats .stat b { font-size: 22px; }
+
+.me-actions { display: grid; gap: 8px; margin-top: 16px; }
+.me-actions .btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.me-actions svg, .menu-row svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.btn.ghost { background: var(--paper); color: var(--ink); border-color: var(--edge); }
+
+.menu { border: var(--line); border-radius: 20px; overflow: hidden; background: var(--paper); }
+.menu-row {
+  display: grid; grid-template-columns: 20px 1fr 16px; gap: 12px; align-items: center;
+  width: 100%; min-height: 60px; padding: 10px 16px; border: 0; background: none; text-align: left; cursor: pointer;
+}
+.menu-row + .menu-row { border-top: 1px solid var(--mist); }
+.menu-row:active { background: var(--sel); }
+.menu-row b { display: block; font-weight: 700; }
+.menu-row small { display: block; margin-top: 2px; font-size: 12px; line-height: 1.3; color: var(--muted); }
+.menu-row .chev { width: 16px; height: 16px; color: var(--muted); }
+.menu-row.off { cursor: default; grid-template-columns: 20px 1fr; }
+.menu-row.off b, .menu-row.off svg { color: var(--muted); }
+
+.sheet .picker { margin-bottom: 8px; }
