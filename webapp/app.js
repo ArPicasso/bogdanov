@@ -1,13 +1,17 @@
 "use strict";
 // Интерфейс — по DESIGN.md. Всё, что пришло из данных, вставляется только через esc().
 
-const tg = window.Telegram && window.Telegram.WebApp;
-const inTelegram = !!(tg && tg.initData);
+// Скрипт Telegram грузится асинхронно и не держит запуск: tg появляется в initTelegram()
+let tg = null;
+let inTelegram = false;
+const launchedInTelegram = /tgWebAppData=/.test(location.hash);
 const TZ = "Europe/Moscow";
 const FAV_KEY = "fav_team";
 const THEME_KEY = "theme";          // "auto" | "light" | "dark", хранится на устройстве
 const SPLASH_KEY = "splash_team";   // эмблема для заставки: её рисуют до загрузки данных
 const SURFACE = { light: "#ffffff", dark: "#111114" };
+const DATA_KEY = "league_cache";    // прошлые данные: повторный запуск рисуется сразу, свежие — в фоне
+const SPLASH_MIN_MS = 480;          // столько нужно буквам заставки, чтобы приземлиться
 
 const DOW = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const MON_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -80,13 +84,8 @@ function fmtLong(iso) {
 
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* приватный режим */ } }
-const cloud = inTelegram && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast("6.9") ? tg.CloudStorage : null;
-
-function loadFav() {
-  return new Promise((resolve) => {
-    if (!cloud) return resolve(lsGet(FAV_KEY));
-    cloud.getItem(FAV_KEY, (err, v) => resolve(err ? lsGet(FAV_KEY) : v || lsGet(FAV_KEY)));
-  });
+function cloud() {
+  return inTelegram && tg.CloudStorage && tg.isVersionAtLeast("6.9") ? tg.CloudStorage : null;
 }
 function rememberSplash(id) {
   const t = team(id);
@@ -95,7 +94,7 @@ function rememberSplash(id) {
 function saveFav(id) {
   lsSet(FAV_KEY, id);
   rememberSplash(id);
-  if (cloud) cloud.setItem(FAV_KEY, id, () => {});
+  if (cloud()) cloud().setItem(FAV_KEY, id, () => {});
 }
 
 // ---------- тема ----------
@@ -104,8 +103,21 @@ function themePref() {
   const v = lsGet(THEME_KEY);
   return v === "light" || v === "dark" ? v : "auto";
 }
+function hashTheme() {
+  try {
+    const m = /tgWebAppThemeParams=([^&]+)/.exec(location.hash);
+    const bg = m && JSON.parse(decodeURIComponent(m[1])).bg_color;
+    if (!bg || !/^#[0-9a-f]{6}$/i.test(bg)) return null;
+    const n = parseInt(bg.slice(1), 16);
+    return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 128 ? "dark" : "light";
+  } catch (e) {
+    return null;
+  }
+}
 function systemTheme() {
   if (inTelegram && tg.colorScheme) return tg.colorScheme;
+  const fromHash = launchedInTelegram && hashTheme();
+  if (fromHash) return fromHash;
   return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 function applyTheme() {
@@ -122,7 +134,7 @@ function applyTheme() {
 }
 function themePills() {
   const pref = themePref();
-  const auto = inTelegram ? "Как в Telegram" : "Как в системе";
+  const auto = launchedInTelegram ? "Как в Telegram" : "Как в системе";
   return `<div class="band-label">Оформление</div><div class="pills" role="group" aria-label="Оформление">${[["auto", auto], ["light", "Светлое"], ["dark", "Тёмное"]]
     .map(([k, v]) => `<button class="${pref === k ? "on" : ""}" data-theme-pick="${k}" aria-pressed="${pref === k}">${v}</button>`)
     .join("")}</div>`;
@@ -539,49 +551,113 @@ document.addEventListener("change", (e) => {
 function startParam() {
   const fromTg = inTelegram && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
   const q = new URLSearchParams(location.search);
-  return fromTg || q.get("startapp") || q.get("team");
+  return fromTg || q.get("tgWebAppStartParam") || q.get("startapp") || q.get("team");
 }
+
+function pickFav(id) {
+  state.fav = id;
+  state.cal.team = id;
+  state.conf = state.teams[id].conf;
+}
+
+function initTelegram() {
+  const w = window.Telegram && window.Telegram.WebApp;
+  if (!w || tg) return;
+  tg = w;
+  inTelegram = !!tg.initData;
+  if (!inTelegram) return;
+  tg.ready();
+  tg.expand();
+  tg.onEvent("themeChanged", applyTheme);
+  tg.BackButton.onClick(closeMatch);
+  if (!$("#sheet").hidden) tg.BackButton.show();
+  applyTheme();
+  // команда могла быть выбрана на другом устройстве — она в облаке Telegram
+  const c = cloud();
+  if (!state.fav && state.data && c) {
+    c.getItem(FAV_KEY, (err, v) => {
+      if (err || !v || !state.teams[v] || state.fav) return;
+      lsSet(FAV_KEY, v);
+      rememberSplash(v);
+      pickFav(v);
+      render();
+    });
+  }
+}
+window.__onTelegram = initTelegram;
 
 function hideSplash() {
   const splash = $("#splash");
-  if (!splash) return;
-  splash.classList.add("out");
-  setTimeout(() => splash.remove(), 300);
+  if (!splash || splash.classList.contains("out")) return;
+  const calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = calm ? 0 : Math.max(0, SPLASH_MIN_MS - (Date.now() - (window.__splashT0 || 0)));
+  setTimeout(() => {
+    splash.classList.add("out");
+    setTimeout(() => splash.remove(), 420);
+  }, wait);
 }
 
-async function main() {
-  applyTheme();
-  if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-  if (inTelegram) {
-    tg.ready();
-    tg.expand();
-    tg.onEvent("themeChanged", applyTheme);
-    tg.BackButton.onClick(closeMatch);
-  }
+function readCache() {
   try {
-    const r = await fetch("data/league.json", { cache: "no-cache" });
-    if (!r.ok) throw new Error(r.status);
-    state.data = await r.json();
-  } catch (err) {
-    $("#screen").innerHTML = `<div class="empty" style="margin-top:24px">Не удалось загрузить матчи. Проверьте интернет и откройте приложение ещё раз.</div>`;
-    hideSplash();
-    return;
+    const d = JSON.parse(lsGet(DATA_KEY));
+    return d && Array.isArray(d.games) && Array.isArray(d.teams) ? d : null;
+  } catch (e) {
+    return null;
   }
-  state.data.teams.forEach((t) => { state.teams[t.id] = t; });
-  fillMarquee();
+}
 
+async function fetchData() {
+  const r = await fetch("data/league.json");   // тот же запрос, что в <link rel="preload">
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function useData(d) {
+  state.data = d;
+  state.teams = {};
+  d.teams.forEach((t) => { state.teams[t.id] = t; });
+  fillMarquee();
+}
+
+function boot(d) {
+  useData(d);
   const fromLink = startParam();
-  const saved = await loadFav();
+  const saved = lsGet(FAV_KEY);
   const fav = [fromLink, saved].find((id) => id && state.teams[id]);
   if (fav) {
-    state.fav = fav;
-    state.cal.team = fav;
-    state.conf = state.teams[fav].conf;
+    pickFav(fav);
     if (fromLink === fav && fav !== saved) saveFav(fav);
     else rememberSplash(fav);
   }
   render();
   hideSplash();
+}
+
+async function main() {
+  applyTheme();
+  if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  initTelegram();   // если скрипт Telegram уже успел загрузиться
+
+  const fresh = fetchData();
+  const cached = readCache();
+  if (cached) boot(cached);
+  try {
+    const d = await fresh;
+    const changed = !cached || d.updated !== cached.updated;
+    if (changed) lsSet(DATA_KEY, JSON.stringify(d));
+    if (!cached) {
+      boot(d);
+    } else if (changed) {
+      const y = window.scrollY;
+      useData(d);
+      render();
+      window.scrollTo(0, y);
+    }
+  } catch (err) {
+    if (cached) return;
+    $("#screen").innerHTML = `<div class="empty" style="margin-top:24px">Не удалось загрузить матчи. Проверьте интернет и откройте приложение ещё раз.</div>`;
+    hideSplash();
+  }
 }
 
 main();
