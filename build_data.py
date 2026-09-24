@@ -158,7 +158,7 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results) -> 
             "calendar": "ФХР (официально) для «Рязань-ВДВ», r-hockey.ru (неофициально) для остальных",
             "results": "протоколы лиги",
         },
-        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf")} for t in teams.all],
+        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo") if k in t} for t in teams.all],
         "games": games,
         "standings": standings(teams, games),
     }
