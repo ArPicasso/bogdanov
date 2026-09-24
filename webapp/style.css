@@ -502,3 +502,47 @@ h1, .display {
 :root[data-theme="dark"] .pills .on { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
 :root[data-theme="dark"] .pills select.on { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%239ccbff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
 :root[data-theme="dark"] { --emblem-bg: #dde1e8; }
+
+/* ---------- переключатель темы ---------- */
+
+.band.has-toggle > h1,
+.band.has-toggle > .hero { margin-right: 52px; }
+.theme-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: var(--line);
+  border-color: var(--edge-strong);
+  border-radius: 9999px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  transform: rotate(-6deg);
+  transition: transform .2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.theme-toggle:active { transform: rotate(-6deg) scale(.9); }
+.theme-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.theme-toggle svg { grid-area: 1 / 1; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-toggle .i-moon { fill: var(--lavender); stroke: var(--on-sticker); }
+.theme-toggle .i-sun { fill: var(--sun); }
+.theme-toggle .i-sun path { fill: none; }
+:root[data-theme="dark"] .theme-toggle .i-moon,
+:root:not([data-theme="dark"]) .theme-toggle .i-sun { display: none; }
+
+/* плавная смена темы только по нажатию, чтобы не мигало при запуске */
+:root.theme-anim,
+:root.theme-anim *,
+:root.theme-anim *::before,
+:root.theme-anim *::after {
+  transition: background-color .3s ease, color .3s ease, border-color .3s ease, fill .3s ease, stroke .3s ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root.theme-anim, :root.theme-anim * { transition: none !important; }
+}
