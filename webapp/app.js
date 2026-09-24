@@ -133,6 +133,34 @@ function applyTheme() {
     if (tg.isVersionAtLeast("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(SURFACE[theme]);
   }
 }
+const SUN = `<svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>`;
+const MOON = `<svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>`;
+function toggleLabel() {
+  return document.documentElement.dataset.theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему";
+}
+// Кнопка-стикер в углу цветной шапки: видна на каждом экране, одно нажатие — светлая ↔ тёмная
+function addThemeToggle() {
+  const band = $("#screen .band");
+  if (!band) return;
+  band.classList.add("has-toggle");
+  band.insertAdjacentHTML("afterbegin", `<button class="theme-toggle" data-theme-toggle type="button" aria-label="${toggleLabel()}">${SUN}${MOON}</button>`);
+}
+let themeAnimTimer = 0;
+function toggleTheme(btn) {
+  const root = document.documentElement;
+  lsSet(THEME_KEY, root.dataset.theme === "dark" ? "light" : "dark");
+  root.classList.add("theme-anim");
+  applyTheme();
+  btn.setAttribute("aria-label", toggleLabel());
+  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+  clearTimeout(themeAnimTimer);
+  themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 400);
+  if (state.tab === "team" || !state.fav) {
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  }
+}
 function themePills() {
   const pref = themePref();
   const auto = launchedInTelegram ? "Как в Telegram" : "Как в системе";
@@ -457,11 +485,13 @@ function render() {
   $("#tabs").hidden = onboarding;
   if (onboarding) {
     screen.innerHTML = renderPicker(true);
+    addThemeToggle();
     return;
   }
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
   const views = { home: renderHome, calendar: renderCalendar, table: renderTable, team: () => renderPicker(false) };
   screen.innerHTML = views[state.tab]();
+  addThemeToggle();
   const anchor = state.tab === "calendar" && !state.scrolledToNext && $("#next-anchor");
   if (anchor) {
     anchor.scrollIntoView({ block: "center" });
@@ -498,8 +528,9 @@ function confirmTeam() {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-close],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],#sheet-backdrop");
   if (!el || el.disabled) return;
+  if (el.hasAttribute("data-theme-toggle")) return toggleTheme(el);
   if (el.dataset.themePick) {
     lsSet(THEME_KEY, el.dataset.themePick);
     applyTheme();
