@@ -238,7 +238,7 @@ function gameRow(g, next) {
   const goals = (id) => (past ? `<span class="gl${lead(id) ? " lead" : ""}">${id === g.home ? g.score.home : g.score.away}</span>` : "");
   const line = (id) => `<div>${emblem(id)}<span class="nm${id === state.fav ? " me" : ""}">${esc(team(id).name)}</span>${goals(id)}</div>`;
   const right = past ? resultPill(g) : `<span class="kick">${g.time ? esc(g.time) : ""}</span>`;
-  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}"${next ? ' id="next-anchor"' : ""}>
+  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
     <div class="date"><b>${d.getUTCDate()}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
     <div class="t">${line(g.home)}${line(g.away)}</div>
     <div class="r">${right}</div>
@@ -253,6 +253,11 @@ function footer() {
 
 // ---------- экраны ----------
 
+// Самый длинный кусок названия, который нельзя перенести: по нему подбирается кегль шапки
+function longestChunk(name) {
+  return Math.max(...name.split(/\s+/).flatMap((w) => w.split(/(?<=-)/)).map((x) => x.length));
+}
+
 function renderHome() {
   const me = state.fav;
   const t = team(me);
@@ -263,7 +268,7 @@ function renderHome() {
   const upcoming = mine.filter(isUpcoming).slice(1, 4);
 
   let html = `<section class="band sky">${RIBBON}
-    <div class="hero">${emblem(me, "xl")}<div><h1>${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>
+    <div class="hero">${emblem(me, "xl")}<div><h1 style="--w:${longestChunk(t.name)}">${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>
   </section>`;
 
   if (st && st.row.gp) {
@@ -286,7 +291,7 @@ function renderHome() {
   if (next) {
     const today = daysFromToday(next.date) === 0;
     html += `<div class="label">Следующий матч${next.n ? `<span class="aside">№ ${esc(next.n)}</span>` : ""}</div>
-      <div class="board-card tap" data-game="${esc(next.id)}">
+      <div class="board-card tap" data-game="${esc(next.id)}" role="button" tabindex="0">
         <div class="board-top">
           <span class="tags">${whereTag(next, me)}${today ? '<span class="tag today">Сегодня</span>' : ""}${next.official ? "" : '<span class="tag soft">предварительно</span>'}</span>
           <span class="when">${esc(fmtLong(next.date))}</span>
@@ -299,7 +304,7 @@ function renderHome() {
 
   if (last) {
     html += `<div class="label">Последний результат</div>
-      <div class="board-card tap" data-game="${esc(last.id)}">
+      <div class="board-card tap" data-game="${esc(last.id)}" role="button" tabindex="0">
         <div class="board-top"><span class="tags">${whereTag(last, me)}${resultPill(last)}</span><span class="when">${esc(fmtLong(last.date))}</span></div>
         ${board(last)}
         ${periodsLine(last)}
@@ -307,7 +312,7 @@ function renderHome() {
   }
 
   if (upcoming.length) {
-    html += `<div class="label">Дальше<span class="aside link" data-tab="calendar">Весь календарь</span></div>
+    html += `<div class="label">Дальше<button type="button" class="aside link" data-tab="calendar">Весь календарь</button></div>
       <div class="list">${upcoming.map((g) => gameRow(g, false)).join("")}</div>`;
   }
   return html + footer();
@@ -364,15 +369,15 @@ function renderTable() {
   let html = `<section class="band mint"><h1>Таблица</h1><div class="pills">${Object.entries(CONF)
     .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}">${v}</button>`)
     .join("")}</div></section>`;
-  html += `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span>В</span><span>П</span><span>Ш</span><span>О</span></div>`;
+  html += `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span class="wl">В</span><span class="wl">П</span><span>Ш</span><span>О</span></div>`;
   rows.forEach((r, i) => {
     if (i === PLAYOFF_CUT) html += `<div class="cut"><span>плей-офф ↑</span></div>`;
     const wins = r.w + r.otw + r.sow;
     const losses = r.l + r.otl + r.sol;
-    html += `<div class="st-row${r.team === state.fav ? " me" : ""}" data-team="${esc(r.team)}">
+    html += `<div class="st-row${r.team === state.fav ? " me" : ""}" data-team="${esc(r.team)}" role="button" tabindex="0">
       <span class="pos">${i + 1}</span>
       <span class="tm">${emblem(r.team)}<span>${esc(team(r.team).name)}</span></span>
-      <span class="n">${r.gp}</span><span class="n">${wins}</span><span class="n">${losses}</span>
+      <span class="n">${r.gp}</span><span class="n wl">${wins}</span><span class="n wl">${losses}</span>
       <span class="n">${r.gf}:${r.ga}</span><span class="pts num">${r.pts}</span>
     </div>`;
   });
@@ -399,13 +404,16 @@ function renderPicker(onboarding) {
     html += `</div>`;
   }
   const changed = chosen && chosen !== state.fav;
-  const label = onboarding ? (chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду") : changed ? `Сохранить — ${esc(team(chosen).name)}` : "Команда выбрана";
+  if (!onboarding && !changed) return html;   // кнопка появляется, только когда есть что сохранить
+  const label = onboarding ? (chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду") : `Сохранить — ${esc(team(chosen).name)}`;
   html += `<div style="height:${onboarding ? 88 : 72}px"></div><div class="cta-bar${onboarding ? "" : " above-nav"}">
-    <button class="btn" data-confirm${(onboarding ? chosen : changed) ? "" : " disabled"}>${label}</button></div>`;
+    <button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
   return html;
 }
 
 // ---------- карточка матча ----------
+
+let sheetOpener = null;   // куда вернуть фокус после закрытия карточки
 
 function openMatch(id) {
   const g = games().find((x) => x.id === id);
@@ -424,8 +432,9 @@ function openMatch(id) {
         html += `<div class="period"><span class="tag">${esc(PERIOD_NAMES[period] || period)}</span></div>`;
       }
       const tag = x.strength && x.strength !== "рав." ? `<span class="tag">${esc(x.strength.replace(".", ""))}</span>` : "";
-      html += `<div class="goal ${x.team}">
+      html += `<div class="goal">
         <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
+        ${emblem(x.team === "away" ? g.away : g.home)}
         <div class="who">${esc(x.author)}${tag}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
         <div class="sc">${esc(x.score)}</div>
       </div>`;
@@ -447,6 +456,8 @@ function openMatch(id) {
   sheet.hidden = false;
   $("#sheet-backdrop").hidden = false;
   sheet.scrollTop = 0;
+  sheetOpener = document.activeElement;
+  sheet.querySelector("[data-close]").focus({ preventScroll: true });
   if (inTelegram) {
     tg.BackButton.show();
     if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
@@ -454,9 +465,12 @@ function openMatch(id) {
 }
 
 function closeMatch() {
+  if ($("#sheet").hidden) return;
   $("#sheet").hidden = true;
   $("#sheet-backdrop").hidden = true;
   if (inTelegram) tg.BackButton.hide();
+  if (sheetOpener && sheetOpener.isConnected) sheetOpener.focus({ preventScroll: true });
+  sheetOpener = null;
 }
 
 // ---------- бегущая строка ----------
@@ -488,7 +502,11 @@ function render() {
     addThemeToggle();
     return;
   }
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === state.tab);
+    if (b.dataset.tab === state.tab) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   const views = { home: renderHome, calendar: renderCalendar, table: renderTable, team: () => renderPicker(false) };
   screen.innerHTML = views[state.tab]();
   addThemeToggle();
@@ -567,6 +585,15 @@ document.addEventListener("click", (e) => {
     state.scrolledToNext = false;
     state.tab = "calendar";
     return render();
+  }
+});
+
+// Строки и карточки с role="button" нажимаются с клавиатуры, Esc закрывает карточку матча
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") return closeMatch();
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) {
+    e.preventDefault();
+    e.target.click();
   }
 });
 
