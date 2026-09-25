@@ -135,7 +135,7 @@
     // Эмблема любимой команды — из прошлого запуска, данные ещё не загружены
     (function () {
       try {
-        var d = JSON.parse(localStorage.getItem("splash_team") || "null");
+        var d = JSON.parse(localStorage.getItem("splash") || "null");
         var el = document.getElementById("splash-em");
         if (!d || !el) return;
         if (d.logo && /^logos\/[\w.-]+$/.test(d.logo)) {
