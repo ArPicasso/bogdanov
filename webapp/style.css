@@ -33,6 +33,7 @@
   --home-bg: var(--mint);     --home-fg: #000000;  --home-edge: #000000;
   --away-bg: var(--lavender); --away-fg: #000000;  --away-edge: #000000;
   --hot-bg: var(--ember);     --hot-fg: #000000;   --hot-edge: #000000;
+  --lead-home: var(--mint);   --lead-away: var(--lavender);   /* ход матча: кто ведёт */
 
   --line: 1px solid var(--edge);
   --display: "Unbounded", "Arial Black", system-ui, sans-serif;
@@ -65,6 +66,7 @@
   --home-bg: rgba(85, 219, 156, .14);  --home-fg: #86ddb3;  --home-edge: rgba(85, 219, 156, .34);
   --away-bg: rgba(233, 204, 255, .12); --away-fg: #d4bdf0;  --away-edge: rgba(233, 204, 255, .30);
   --hot-bg: rgba(251, 73, 3, .18);     --hot-fg: #ff9a70;   --hot-edge: rgba(251, 73, 3, .45);
+  --lead-home: rgba(85, 219, 156, .30); --lead-away: rgba(233, 204, 255, .34);
   color-scheme: dark;
 }
 
@@ -573,6 +575,88 @@ h1, .display {
 .period + .goal { border-top: 0; }
 .goal + .goal, .goal + .period { border-top: 1px solid var(--mist); }
 
+.goal.hl { background: var(--sel); }
+.goal.pen .who { font-weight: 500; font-size: 13px; }
+.goal.pen .tm, .goal.pen .sc { font-weight: 500; color: var(--muted); }
+.goal .who .tag.soft { background: var(--mist); color: var(--muted); border-color: var(--mist); }
+
+/* ---------- разбор матча (ADR-008) ---------- */
+
+.story { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; padding: 12px 14px; border: var(--line); border-radius: 20px; background: var(--band-sky); }
+.story svg { flex: none; width: 22px; height: 22px; margin-top: 1px; fill: var(--sun); stroke: var(--on-sticker); stroke-width: 1.2; stroke-linejoin: round; }
+.story p { margin: 0; font-size: 15px; line-height: 1.4; }
+
+.flow { border: var(--line); border-radius: 20px; padding: 12px 12px 10px; }
+.flow svg { display: block; width: 100%; height: auto; overflow: visible; }
+.flow .fl-home { fill: var(--lead-home); }
+.flow .fl-away { fill: var(--lead-away); }
+.flow .fl-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+.flow .fl-axis { stroke: var(--edge-strong); stroke-width: 1; }
+.flow .fl-grid { stroke: var(--mist); stroke-width: 1; stroke-dasharray: 3 3; }
+.flow .fl-lane { stroke: var(--mist); stroke-width: 1; }
+.flow .fl-pen { fill: var(--muted); }
+.flow .fl-ax { font: 700 9px var(--ui); letter-spacing: .04em; fill: var(--muted); }
+.flow .fl-per { font: 700 10px var(--ui); letter-spacing: .04em; fill: var(--muted); }
+.flow .fl-dot { cursor: pointer; outline: none; }
+.flow .fl-dot .hit { fill: transparent; }
+.flow .fl-dot .v { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+.flow .fl-dot.pp .v { fill: var(--ink); }
+.flow .fl-dot.on .v { stroke-width: 2.5; }
+.flow .fl-dot:focus-visible .v { stroke: var(--blue); stroke-width: 2.5; }
+.flow-cap { display: grid; grid-template-columns: 44px 24px 1fr auto; gap: 10px; align-items: center; min-height: 46px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--mist); }
+.flow-cap .tm { font-weight: 700; font-size: 13px; }
+.flow-cap .who { min-width: 0; font-weight: 700; }
+.flow-cap .who small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+.flow-cap .tag { height: 20px; padding: 0 7px; font-size: 10px; margin-left: 6px; vertical-align: 1px; }
+.flow-cap .tag.soft { background: var(--mist); color: var(--muted); border-color: var(--mist); }
+.flow-cap .sc { font: 800 18px/1 var(--display); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.legend .k-home { background: var(--lead-home); }
+.legend .k-away { background: var(--lead-away); }
+.legend .k-dot { border-radius: 50%; border: 1.5px solid var(--ink); background: var(--paper); }
+.legend .k-dot.pp { background: var(--ink); }
+.legend .k-pen { width: 14px; height: 6px; border-radius: 3px; background: var(--muted); }
+
+/* Вкладки разбора прилипают к верху карточки, пока листаешь голы и составы */
+.recap-seg { position: sticky; top: -10px; z-index: 2; margin-top: 24px; }
+.recap-seg button { height: 38px; }
+.recap-body > .chips { margin: 14px 0 10px; }
+.recap-body > .goals, .recap-body > .cmp-head { margin-top: 14px; }
+
+.cmp-head { display: grid; grid-template-columns: 24px auto 1fr auto 24px; gap: 8px; align-items: center; margin: 0 2px 10px; font: 700 12px/1 var(--ui); letter-spacing: .04em; color: var(--muted); }
+.cmp { border: var(--line); border-radius: 20px; padding: 4px 16px; }
+.cmp-row { padding: 12px 0; }
+.cmp-row + .cmp-row { border-top: 1px solid var(--mist); }
+.cmp-top { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: baseline; }
+.cmp-top b { font: 800 18px/1 var(--display); }
+.cmp-top.small b { font: 700 15px/1 var(--ui); }
+.cmp-top b:last-child { text-align: right; }
+.cmp-top span { font: 700 11px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); text-align: center; }
+.cmp-bar { display: flex; gap: 2px; height: 10px; margin-top: 8px; }
+.cmp-bar i { display: block; min-width: 10px; border: var(--line); border-radius: 9999px; background: var(--paper); }
+.cmp-bar i.w { background: var(--act); border-color: var(--act); }
+
+.gk { border: var(--line); border-radius: 20px; }
+.gk-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; }
+.gk-row + .gk-row { border-top: 1px solid var(--mist); }
+.gk-row .nm { min-width: 0; font-weight: 700; }
+.gk-row .nm small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+.gk-row .pc { font: 800 18px/1 var(--display); }
+
+.roster { border: var(--line); border-radius: 20px; overflow: hidden; }
+.roster .grp { padding: 10px 14px 4px; font: 700 11px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.roster .pl { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; padding: 9px 14px; }
+.roster .pl + .pl { border-top: 1px solid var(--mist); }
+.roster .pl.scored { background: var(--sel); }
+.roster .no { font: 800 13px/1 var(--display); color: var(--muted); }
+.roster .nm { min-width: 0; font-weight: 700; }
+.roster .nm .tag { height: 20px; padding: 0 7px; font-size: 10px; margin-left: 6px; vertical-align: 1px; }
+.roster .pts { font-weight: 700; font-size: 13px; }
+.roster .pts.z { font-weight: 500; color: var(--muted); }
+.note { margin: 8px 2px 0; font-size: 12px; color: var(--muted); }
+
 .facts-card { border: var(--line); border-radius: 20px; padding: 14px 16px; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font-size: 14px; }
 .facts dt { color: var(--muted); }
@@ -586,7 +670,8 @@ h1, .display {
 /* Сплошной синий — только активная вкладка и главная кнопка. Победы и выбранные фильтры — тоном */
 :root[data-theme="dark"] .res.w,
 :root[data-theme="dark"] .pills .on,
-:root[data-theme="dark"] .seg .on { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
+:root[data-theme="dark"] .seg .on,
+:root[data-theme="dark"] .cmp-bar i.w { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
 :root[data-theme="dark"] { --emblem-bg: #dde1e8; }
 
 /* ---------- переключатель темы ---------- */

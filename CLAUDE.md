@@ -23,13 +23,15 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `bot.py` | Вся логика: онбординг `/start`, хендлеры, форматирование, `reminder_loop` |
 | `games.json` | Календарь сезона, 48 игр. Правится руками |
 | `subscribers.json` | Подписчики на напоминания. Не в git |
+| `announced.json` | Матчи, о которых бот уже написал после игры (ADR-008). Не в git |
+| `hidden_players.json` | Id игроков на сайте лиги, которых не показываем по просьбе (ADR-007, ADR-008) |
 | `league.py` | Загрузка и разбор протоколов матчей с сайта лиги → `results.json` (ADR-001) |
 | `results.json` | Результаты: id турнира → номер матча `n` (как в `games.json`) → протокол. Не в git |
 | `tests/` | Тесты на `unittest`, фикстуры — реальные страницы сайта лиги |
 | `docs/adr/` | Архитектурные решения, по файлу на решение |
 | `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания, прежние названия (`former`) |
 | `rhockey.py` | Календарь всей лиги с r-hockey.ru — временно, до открытия rhl.fhr.ru |
-| `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица) и `h2h.json` |
+| `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица), `h2h.json` и разборы матчей `matches/<id>.json` (ADR-008) |
 | `history.py` | Матчи пяти прошлых сезонов НМХЛ с сайта лиги → `history.json` для очных встреч (ADR-006) |
 | `history.json` | Прошлые сезоны, команды уже в id из `teams.json`. В git, пересобирается руками раз в сезон |
 | `webapp/` | Мини-апп: `index.html`, `style.css`, `app.js`, без сборки. Публикуется на GitHub Pages |

@@ -107,3 +107,101 @@ class Links(unittest.TestCase):
 
     def test_defaults(self):
         self.assertEqual(b.links({}), {"bot": "https://t.me/rhl_u21_bot", "app": "https://t.me/rhl_u21_bot/myapp"})
+
+
+def protocol_game(name: str, game_id: int, home: str, away: str, hidden: set[int] = frozenset()) -> tuple[dict, dict]:
+    """Протокол из фикстуры — как он лежит в results.json, и матч, к которому он привязан."""
+    import league
+    p = json.loads(json.dumps(league.parse_protocol((FIX / name).read_text(encoding="utf-8"), game_id).to_json()))
+    g = {"id": "n1", "n": None, "date": p["date"], "home": home, "away": away, "official": True}
+    teams = b.Teams([{"id": home, "name": p["home"], "city": "", "conf": "east", "rhockey": 1, "aliases": []},
+                     {"id": away, "name": p["away"], "city": "", "conf": "east", "rhockey": 2, "aliases": []}])
+    b.attach_results([g], teams, {"1": {"1": p}}, hidden=hidden)
+    return g, p
+
+
+NAMES = {"ryazan-vdv": "Рязань-ВДВ", "belgorod": "Белгород", "samara": "Самара", "kristall": "Кристалл"}
+
+
+class MatchRecap(unittest.TestCase):
+    """Разбор прошедшего матча (ADR-008)."""
+
+    def detail(self, name, game_id, home, away, hidden=frozenset()):
+        g, p = protocol_game(name, game_id, home, away, hidden)
+        return g, b.match_detail(g, p, NAMES, hidden)
+
+    def test_regular_game(self):
+        g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
+        self.assertEqual(d["shots"], {"home": 45, "away": 15})
+        self.assertEqual(d["faceoffs"], {"home": 29, "away": 20})
+        self.assertEqual(d["pim"], {"home": 8, "away": 4})
+        self.assertEqual(d["pp"], {"home": [1, 2], "away": [0, 4]})
+        self.assertEqual(d["gw"], 2)                       # 2:1, Колыхалов
+        self.assertEqual(d["length"], 60)
+        self.assertEqual([k["name"] for k in d["goalies"]], ["Самойлов Тимофей", "Шевченко Артём А."])
+        self.assertEqual(len(d["lineups"]["home"]["F"]), 14)
+        self.assertEqual(d["penalties"][1]["who"], "Командный штраф")
+        self.assertEqual(d["coaches"]["away"], "Романов Андрей Александрович")
+
+    def test_story_burst_after_opponent_opened(self):
+        _, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
+        self.assertEqual(d["story"], "Первыми забили гости, а дальше пять шайб подряд у «Рязань-ВДВ» "
+                                     "за 12 минут второго периода.")
+
+    def test_story_comeback_and_overtime(self):
+        _, d = self.detail("protocol_901016_ot.html", 901016, "samara", "ryazan-vdv")
+        self.assertEqual(d["story"], "Камбэк «Рязань-ВДВ»: уступали 3:5, но отыгрались. "
+                                     "В овертайме победу принёс Михеев Яромир.")
+        self.assertEqual(d["length"], 65)
+
+    def test_story_shootout(self):
+        _, d = self.detail("protocol_901033_shootout.html", 901033, "kristall", "ryazan-vdv")
+        self.assertTrue(d["story"].startswith("Всё решили буллиты, победный забил Шафеев Данат."))
+
+    def test_mutual_penalties_give_no_power_play(self):
+        _, d = self.detail("protocol_901033_shootout.html", 901033, "kristall", "ryazan-vdv")
+        # 47:18 — взаимные удаления Белицына и Бахтеева, большинства нет
+        self.assertEqual(d["pp"], {"home": [0, 3], "away": [2, 6]})
+
+    def test_quiet_game_has_no_story(self):
+        g = {"home": "ryazan-vdv", "away": "belgorod", "score": {"home": 2, "away": 1, "decision": ""},
+             "goals": [{"period": "1", "time": "10:00", "team": "home", "score": "1:0", "author": "А"},
+                       {"period": "2", "time": "30:00", "team": "away", "score": "1:1", "author": "Б"},
+                       {"period": "3", "time": "45:00", "team": "home", "score": "2:1", "author": "В"}]}
+        self.assertEqual(b.story(g, NAMES), "")
+
+    def test_shutout_and_late_winner(self):
+        g = {"home": "ryazan-vdv", "away": "belgorod", "score": {"home": 1, "away": 0, "decision": ""},
+             "goals": [{"period": "3", "time": "58:48", "team": "home", "score": "1:0", "author": "Иванов Иван"}]}
+        goalies = [{"team": "home", "name": "Петров Пётр", "shots": 31}]
+        self.assertEqual(b.story(g, NAMES, goalies),
+                         "Сухой матч: Петров Пётр отразил все 31 бросок. Победная шайба за 1:12 до сирены: Иванов Иван.")
+
+    def test_hidden_player_everywhere(self):
+        # 44596 — Щербаков, автор гола Белгорода; 45805 — Фурлетов, первое удаление
+        g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod", {44596, 45805})
+        self.assertEqual(g["goals"][0]["author"], b.HIDDEN_NAME)
+        self.assertEqual((d["penalties"][0]["who"], d["penalties"][0]["no"]), (b.HIDDEN_NAME, None))
+        names = [x["name"] for grp in d["lineups"]["away"].values() for x in grp]
+        self.assertNotIn("Щербаков Артём Ан.", names)
+        self.assertNotIn("44596", json.dumps(d))
+
+    def test_no_player_ids_in_app_data(self):
+        g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
+        self.assertNotIn('"id": 4', json.dumps(g["goals"]))
+        self.assertNotIn("44596", json.dumps(d))
+
+    def test_old_protocol_without_details(self):
+        g, p = protocol_game("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
+        for k in ("penalties", "lineups", "referees", "linesmen", "coaches"):
+            p.pop(k)
+        d = b.match_detail(g, p, NAMES)
+        self.assertEqual((d["penalties"], d["lineups"], d["shots"], d["goalies"]), ([], None, None, []))
+        self.assertTrue(d["story"])
+
+    def test_hidden_file_is_a_list(self):
+        self.assertIsInstance(json.loads((ROOT / "hidden_players.json").read_text(encoding="utf-8")), list)
+
+
+if __name__ == "__main__":
+    unittest.main()

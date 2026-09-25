@@ -3,6 +3,7 @@ import json
 import re
 import sys
 import unittest
+from datetime import date, datetime, time
 from pathlib import Path
 from unittest import mock
 
@@ -90,6 +91,73 @@ class Stickers(unittest.TestCase):
         for n in icons:
             data = (bot.STICKERS / "emoji" / f"{n}.webp").read_bytes()
             self.assertEqual(data[:4] + data[8:12], b"RIFFWEBP", n)
+
+
+class AfterMatch(unittest.TestCase):
+    """Сообщение после матча с кнопкой «Как это было» (ADR-008)."""
+
+    names = {"ryazan-vdv": "Рязань-ВДВ", "samara": "Самара", "belgorod": "Белгород"}
+
+    def game(self, gid, d, home, away, hs, as_, dec=""):
+        return {"id": gid, "date": d, "home": home, "away": away,
+                "score": {"home": hs, "away": as_, "decision": dec, "periods": []}}
+
+    def test_match_link(self):
+        with mock.patch.object(bot, "WEBAPP_URL", "https://x.github.io/app/"):
+            kb = bot.recap_kb("n4").inline_keyboard
+            self.assertEqual(bot.data_url("league.json"), "https://x.github.io/app/data/league.json")
+        self.assertEqual(kb[0][0].web_app.url, "https://x.github.io/app/?match=n4")
+        self.assertIn("Как это было", kb[0][0].text)
+
+    def test_data_url_without_query(self):
+        with mock.patch.object(bot, "WEBAPP_URL", "https://x.github.io/app/index.html?v=2"):
+            self.assertEqual(bot.data_url("matches/n4.json"), "https://x.github.io/app/data/matches/n4.json")
+
+    def test_win_text(self):
+        g = self.game("n4", "2026-10-03", "ryazan-vdv", "belgorod", 6, 1)
+        text = bot.result_text(g, self.names, "Пять шайб подряд у «Рязань-ВДВ».")
+        self.assertIn("Победа!", text)
+        self.assertIn("Рязань-ВДВ <b>6:1</b> Белгород", text)
+        self.assertIn("Пять шайб подряд у «Рязань-ВДВ».", text)
+
+    def test_away_overtime_win_and_loss(self):
+        g = self.game("n78", "2026-10-03", "samara", "ryazan-vdv", 5, 6, "ОТ")
+        self.assertIn("Победа в овертайме!", bot.result_text(g, self.names))
+        self.assertIn("Самара <b>5:6</b> (ОТ) Рязань-ВДВ", bot.result_text(g, self.names))
+        g = self.game("n79", "2026-10-04", "samara", "ryazan-vdv", 3, 2, "Б")
+        self.assertIn("Поражение по буллитам", bot.result_text(g, self.names))
+
+    def test_text_is_valid_html(self):
+        g = self.game("n4", "2026-10-03", "ryazan-vdv", "belgorod", 6, 1)
+        text = bot.result_text(g, {"ryazan-vdv": "Рязань-ВДВ", "belgorod": "<b>"}, "a < b")
+        self.assertNotIn("<b><b>", text)
+        self.assertIn("&lt;b&gt;", text)
+        self.assertIn("a &lt; b", text)
+
+    def test_only_fresh_unannounced_games_of_our_team(self):
+        data = {"games": [
+            self.game("old", "2026-10-01", "ryazan-vdv", "belgorod", 1, 0),
+            self.game("done", "2026-10-04", "ryazan-vdv", "belgorod", 2, 0),
+            self.game("new", "2026-10-05", "samara", "ryazan-vdv", 2, 3),
+            self.game("other", "2026-10-05", "samara", "belgorod", 2, 3),
+            {"id": "future", "date": "2026-10-06", "home": "ryazan-vdv", "away": "samara"},
+        ]}
+        fresh = bot.fresh_results(data, {"done"}, date(2026, 10, 5))
+        self.assertEqual([g["id"] for g in fresh], ["new"])
+
+    def test_quiet_at_night(self):
+        tz = bot.TZ
+        self.assertTrue(bot.quiet(datetime(2026, 10, 5, 23, 30, tzinfo=tz)))
+        self.assertTrue(bot.quiet(datetime(2026, 10, 6, 8, 59, tzinfo=tz)))
+        self.assertFalse(bot.quiet(datetime(2026, 10, 6, 9, 0, tzinfo=tz)))
+        self.assertFalse(bot.quiet(datetime(2026, 10, 5, 21, 40, tzinfo=tz)))
+
+    def test_first_run_has_no_file(self):
+        with mock.patch.object(bot, "ANNOUNCED_FILE", Path("/nonexistent/announced.json")):
+            self.assertIsNone(bot.load_announced())
+
+    def test_reminder_times_unchanged(self):
+        self.assertEqual((bot.REMIND_TODAY_AT, bot.REMIND_TOMORROW_AT), (time(10, 0), time(19, 0)))
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import league  # noqa: E402
-from league import Goal, Player  # noqa: E402
+from league import Goal, Penalty, Player  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -67,6 +67,61 @@ class ShootoutProtocol(unittest.TestCase):
         self.assertEqual((last.period, last.team, last.assists), ("РБ", "home", ()))
 
 
+class ProtocolDetails(unittest.TestCase):
+    """Удаления, составы, судьи и тренеры для разбора матча (ADR-008)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.p = league.parse_protocol(fixture("protocol_900942_regular.html"), 900942)
+
+    def test_penalties_both_sides_in_time_order(self):
+        pens = self.p.penalties
+        self.assertEqual(len(pens), 6)
+        self.assertEqual(pens[0], Penalty("01:45", "away", Player(37, "Фурлетов Вячеслав"), 2, "задержка клюшкой"))
+        self.assertEqual(sum(x.minutes for x in pens if x.team == "home"), 8)
+        self.assertEqual(sum(x.minutes for x in pens if x.team == "away"), 4)
+
+    def test_bench_minor_has_no_player(self):
+        bench = self.p.penalties[1]
+        self.assertEqual((bench.time, bench.team, bench.player, bench.reason),
+                         ("22:41", "home", None, "нарушение численного состава"))
+
+    def test_player_id_from_link(self):
+        self.assertEqual(self.p.goals[0].author.id, 44596)
+        self.assertEqual(self.p.penalties[0].player.id, 45805)
+
+    def test_lineups(self):
+        home = [x for x in self.p.lineups if x.team == "home"]
+        away = [x for x in self.p.lineups if x.team == "away"]
+        self.assertEqual((len(home), len(away)), (22, 22))
+        roles = [x.role for x in home]
+        self.assertEqual((roles.count("G"), roles.count("D"), roles.count("F")), (2, 6, 14))
+        capt = {x.player.name: x.captain for x in home if x.captain}
+        self.assertEqual(capt, {"Ефимов Роман А.": "А", "Золкин Роман": "К", "Рябышев Максим": "А"})
+        kolykhalov = next(x for x in home if x.player.number == 91)
+        self.assertEqual((kolykhalov.goals, kolykhalov.assists, kolykhalov.role), (1, 1, "F"))
+
+    def test_goalies(self):
+        g = {x.player.number: x for x in self.p.lineups if x.role == "G"}
+        self.assertEqual((g[20].shots_against, g[20].saves, g[20].toi, g[20].played), (15, 14, "60:00", True))
+        self.assertEqual((g[92].played, g[92].toi), (False, ""))
+        self.assertEqual((g[90].team, g[90].shots_against, g[90].saves), ("away", 45, 39))
+
+    def test_faceoffs(self):
+        won = {side: sum(x.faceoffs_won for x in self.p.lineups if x.team == side) for side in ("home", "away")}
+        self.assertEqual(won, {"home": 29, "away": 20})
+
+    def test_officials_and_coaches(self):
+        self.assertEqual(self.p.referees, ("Иванов Савелий", "Беляев Михаил"))
+        self.assertEqual(self.p.linesmen, ("Горшков Егор", "Галактионов Мирослав"))
+        self.assertEqual(self.p.coaches, ("Истомин Александр Анатольевич", "Романов Андрей Александрович"))
+
+    def test_goalie_change_in_overtime_game(self):
+        p = league.parse_protocol(fixture("protocol_901016_ot.html"), 901016)
+        home_g = [(x.player.name, x.toi) for x in p.lineups if x.team == "home" and x.role == "G"]
+        self.assertEqual(home_g, [("Ложкин Роман", "57:06"), ("Трошкин Кирилл", "6:09")])
+
+
 class NotAProtocol(unittest.TestCase):
     def test_unknown_page_gives_none(self):
         self.assertIsNone(league.parse_protocol("<html><body>Страница не найдена</body></html>", 1))
@@ -108,7 +163,7 @@ class ResultsFile(unittest.TestCase):
             league.save_results({"1378": {str(p.n): p.to_json()}}, path)
             data = league.load_results(path)["1378"]
         self.assertEqual(data["4"]["date"], "2025-10-04")
-        self.assertEqual(data["4"]["goals"][0]["author"], {"number": 23, "name": "Щербаков Артём Ан."})
+        self.assertEqual(data["4"]["goals"][0]["author"], {"number": 23, "name": "Щербаков Артём Ан.", "id": 44596})
         json.dumps(data)
 
     def test_missing_file_is_empty(self):
