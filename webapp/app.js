@@ -46,7 +46,6 @@ const state = {
   scrolledToNext: false,
   h2h: null,        // история очных встреч (ADR-006): грузится при первом открытии карточки матча
   tableView: "teams",   // «Таблица»: команды или лидеры лиги (ADR-009)
-  leadCat: "pts",
   leaders: null,    // лидеры лиги: грузятся при первом открытии «Игроков»
 };
 
@@ -618,42 +617,44 @@ function refreshCalendar(keep) {
 }
 
 function renderTable() {
-  return `<section class="band mint"><h1>Таблица</h1><div id="table-filters">${tableFilters()}</div></section>
+  return `<section class="band mint"><h1>Таблица</h1>
+    <div class="seg table-seg" role="group" aria-label="Что показать" data-run="table-view">${RUN}${tableSeg()}</div></section>
     <div id="table-body">${state.tableView === "players" ? leadersBody() : tableBody()}</div>`;
 }
 
-// Шапка «Таблицы»: «Команды · Игроки», под ними конференции или показатели (ADR-009).
-// Пилюли — во всю ширину: конференции в один ряд, шесть показателей — сеткой 3×2, все на виду
-function tableFilters() {
+// Шапка «Таблицы» — только «Команды · Игроки»: она одинаковой высоты в обоих видах (ADR-009)
+function tableSeg() {
   const players = state.tableView === "players";
-  const pills = players
-    ? LEAD_CATS.map(([k, v]) => `<button class="${state.leadCat === k ? "on" : ""}" data-lead-cat="${k}" aria-pressed="${state.leadCat === k}">${v}</button>`)
-    : Object.entries(CONF).map(([k, v]) => `<button class="${state.conf === k ? "on" : ""}" data-conf="${k}" aria-pressed="${state.conf === k}">${v}</button>`);
-  return `<div class="seg table-seg" role="group" aria-label="Что показать" data-run="table-view">${RUN}
-      ${segBtn(!players, 'data-table-view="teams"', "<span>Команды</span>")}
-      ${segBtn(players, 'data-table-view="players"', "<span>Игроки</span>")}
-    </div>
-    <div class="pills fill" style="--n:${players ? 3 : 2}" role="group" aria-label="${players ? "Показатель" : "Конференция"}">${pills.join("")}</div>`;
+  return segBtn(!players, 'data-table-view="teams"', "<span>Команды</span>")
+    + segBtn(players, 'data-table-view="players"', "<span>Игроки</span>");
 }
 
-// «Команды · Игроки»: бегунок перетекает сразу, список — в следующем кадре
+// «Команды · Игроки»: бегунок перетекает сразу, содержимое — в следующем кадре
 function refreshTable() {
-  const bar = $("#table-filters");
-  if (!bar) return render();
-  const prev = runnerState(bar);
-  bar.innerHTML = tableFilters();
-  placeRunners(bar, prev);
+  const seg = $(".table-seg");
+  if (!seg) return render();
+  const prev = runnerState(seg.parentNode);
+  seg.querySelectorAll("button").forEach((b) => b.remove());
+  seg.insertAdjacentHTML("beforeend", tableSeg());
+  placeRunners(seg.parentNode, prev);
   nextFrame(() => {
     const box = $("#table-body");
     if (!box || state.tab !== "table") return;
     box.innerHTML = state.tableView === "players" ? leadersBody() : tableBody();
+    placeRunners(box);
     fadeIn(box);
   });
 }
 
+// Конференции — вторичный фильтр (DESIGN.md): лёгкие чипы во всю ширину, как в Календаре
 function tableBody() {
-  const conf = state.conf;
-  const rows = state.data.standings[conf] || [];
+  const chips = Object.entries(CONF).map(([k, v]) => segBtn(state.conf === k, `data-conf="${k}"`, v)).join("");
+  return `<div class="chips fill conf-chips" role="group" aria-label="Конференция" data-run="table-conf">${RUN}${chips}</div>
+    <div id="standings">${standingsTable()}</div>`;
+}
+
+function standingsTable() {
+  const rows = state.data.standings[state.conf] || [];
   let html = `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span class="wl">В</span><span class="wl">П</span><span>Ш</span><span>О</span></div>`;
   rows.forEach((r, i) => {
     if (i === PLAYOFF_CUT) html += `<div class="cut"><span>плей-офф ↑</span></div>`;
@@ -676,21 +677,19 @@ function tableBody() {
 
 // ---------- лидеры лиги (ADR-009) ----------
 
-// Показатель → подпись пилюли и колонки строки; выбранная колонка — жирным
-const LEAD_CATS = [["pts", "Бомбардиры"], ["g", "Снайперы"], ["a", "Ассистенты"], ["pm", "+/−"], ["sv_pct", "Вратари"], ["pim", "Штраф"]];
-const LEAD_COLS = {
-  pts: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
-  g: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
-  a: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
-  pm: [["gp", "И"], ["pts", "О"], ["pm", "+/−"]],
-  pim: [["gp", "И"], ["pts", "О"], ["pim", "Штр"]],
-  sv_pct: [["gp", "И"], ["gaa", "КН"], ["sv_pct", "%ОБ"]],
+// Показатель: название, подпись к числу (по числу — plural), как писать строку под именем в топ-10
+const LEAD_CATS = {
+  pts: { title: "Бомбардиры", unit: ["очко", "очка", "очков"], sub: (r) => `${r.g}+${r.a} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
+  g: { title: "Снайперы", unit: ["гол", "гола", "голов"], sub: (r) => `${r.pts} ${plural(r.pts, "очко", "очка", "очков")} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
+  a: { title: "Ассистенты", unit: ["передача", "передачи", "передач"], sub: (r) => `${r.pts} ${plural(r.pts, "очко", "очка", "очков")} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
+  pm: { title: "Плюс-минус", unit: null, sub: (r) => `${r.pts} ${plural(r.pts, "очко", "очка", "очков")} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
+  sv_pct: { title: "Вратари", unit: "% отражённых", sub: (r) => `КН ${leadValue("gaa", r.gaa)} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
+  pim: { title: "Штраф", unit: ["минута", "минуты", "минут"], sub: (r) => `${r.pts} ${plural(r.pts, "очко", "очка", "очков")} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
 };
-const LEAD_LEGEND = {
-  pts: "И — игры, Ш — голы, А — передачи, О — очки: гол или передача",
-  pm: "+/− — забитые минус пропущенные шайбы, пока игрок на льду; голы в большинстве не считаются",
-  pim: "Штр — штрафные минуты",
-  sv_pct: "%ОБ — отражённые броски, КН — пропущено в среднем за 60 минут. Вратари с малым игровым временем в список лиги не входят",
+const LEAD_NOTE = {
+  pts: "Очки — голы плюс передачи.",
+  pm: "Плюс-минус — забитые минус пропущенные шайбы, пока игрок на льду; голы в большинстве не считаются.",
+  sv_pct: "КН — пропущено в среднем за 60 минут. Вратари с малым игровым временем в список лиги не входят.",
 };
 
 let leadersLoading = null;
@@ -717,19 +716,57 @@ function fillLeaders() {
 function leadValue(k, v) {
   if (v == null) return "—";
   if (k === "pm") return v > 0 ? `+${v}` : v < 0 ? `−${-v}` : "0";
-  if (k === "sv_pct" || k === "gaa") return String(v.toFixed(k === "gaa" ? 2 : 1)).replace(".", ",");
+  if (k === "sv_pct" || k === "gaa") return v.toFixed(k === "gaa" ? 2 : 1).replace(".", ",");
   return String(v);
 }
+function leadUnit(cat, v) {
+  const u = LEAD_CATS[cat].unit;
+  if (!u) return "";
+  return typeof u === "string" ? u : plural(Math.abs(v), ...u);
+}
+const clubOf = (r) => (r.team ? team(r.team).name : r.club || "");
+// «Султанов Реваль» → фамилия крупно, имя мельче: в карточке лидера узко
+const splitName = (n) => { const i = n.indexOf(" "); return i < 0 ? [n, ""] : [n.slice(0, i), n.slice(i + 1)]; };
 
-function leaderRow(r, cols, main) {
-  const club = r.team
-    ? `${emblem(r.team)}<span>${esc(team(r.team).name)}</span>`
-    : `<span>${esc(r.club)}</span>`;
-  return `<div class="st-row lead-row${r.team && r.team === state.fav ? " me" : ""}">
-    <span class="pos">${r.rank}</span>
-    <span class="pl"><b>${esc(r.name)}</b><small>${club}</small></span>
-    ${cols.map(([k]) => `<span class="${k === main ? "pts" : "n"}${k === "gp" ? " wl" : ""}">${leadValue(k, r[k])}</span>`).join("")}
-  </div>`;
+function leadSeason(d) {
+  const past = d.season !== state.data.season;
+  return `<div class="label">${esc(d.league)} ${esc(d.season)}<span class="aside">${past ? "прошлый сезон" : esc(d.stage)}</span></div>`;
+}
+
+// Карточка показателя: одно большое число и лидер; эмблема его клуба — наклейка в углу
+function leadCard(cat, r) {
+  const c = LEAD_CATS[cat];
+  if (!r) return `<div class="lead-card empty-card"><span class="lc-cat">${c.title}</span><span class="lc-none">появятся после первых матчей</span></div>`;
+  const [last, first] = splitName(r.name);
+  return `<button type="button" class="lead-card${r.team && r.team === state.fav ? " me" : ""}" data-lead-open="${cat}" aria-label="${c.title}: топ-10">
+    <span class="lc-cat">${c.title}</span>
+    ${r.team ? `<span class="lc-em">${emblem(r.team, "md")}</span>` : ""}
+    <span class="lc-val num">${leadValue(cat, r[cat])}</span>
+    <span class="lc-unit">${esc(leadUnit(cat, r[cat]))}</span>
+    <span class="lc-name"><b>${esc(last)}</b> ${esc(first)}</span>
+    <span class="lc-club">${esc(clubOf(r))}</span>
+  </button>`;
+}
+
+// Игроки любимой команды в списках лиги: по строке на игрока, в подписи — все его места.
+// Нажатие открывает список, где он выше всего
+const LEAD_BY = { pts: "по очкам", g: "по голам", a: "по передачам", pm: "по плюс-минусу", sv_pct: "среди вратарей", pim: "по штрафу" };
+function mineBlock(d) {
+  if (!state.fav) return "";
+  const people = new Map();
+  for (const cat of Object.keys(LEAD_CATS)) {
+    const r = (d.categories[cat] || []).find((x) => x.team === state.fav);
+    if (!r) continue;
+    if (!people.has(r.name)) people.set(r.name, []);
+    people.get(r.name).push([cat, r.rank]);
+  }
+  if (!people.size) return "";
+  const rows = [...people].map(([name, places]) => [name, places.sort((x, y) => x[1] - y[1])]).sort((x, y) => x[1][0][1] - y[1][0][1]);
+  return `<div class="label">${esc(team(state.fav).name)} в лидерах</div><div class="list mine-leads">${rows.map(([name, places]) =>
+    `<div class="row mine-row" data-lead-open="${places[0][0]}" role="button" tabindex="0">
+      <span class="ml-rank num">${places[0][1]}</span>
+      <span class="ml-who"><b>${esc(name)}</b><small>${places.map(([cat, rank]) => `${rank}-й ${LEAD_BY[cat]}`).join(" · ")}</small></span>
+    </div>`).join("")}</div>`;
 }
 
 function leadersBody() {
@@ -737,26 +774,45 @@ function leadersBody() {
   if (!d && leadersFailed) return failBlock("Лидеры лиги", "leaders");
   if (!d) {
     fillLeaders();
-    return `<div class="sk sk-label"></div><div class="sk" style="height:${38 + 10 * 57}px"></div>`;
+    return `<div class="sk sk-label"></div><div class="lead-grid">${'<div class="sk" style="height:156px;margin:0"></div>'.repeat(6)}</div>`;
   }
-  const cat = state.leadCat;
-  const rows = d.categories[cat] || [];
-  const cols = LEAD_COLS[cat];
-  const top = rows.filter((r) => r.rank <= 10);
-  const mine = state.fav && !top.some((r) => r.team === state.fav) && rows.find((r) => r.team === state.fav);
   const past = d.season !== state.data.season;
-  let html = `<div class="label">${esc(d.league)} ${esc(d.season)}<span class="aside">${past ? "прошлый сезон" : esc(d.stage)}</span></div>`;
-  html += `<div class="st lead" style="--cols:${cols.length}"><div class="st-row lead-row head"><span class="pos"></span><span class="pl">Игрок</span>${cols
-    .map(([k, l]) => `<span class="${k === "gp" ? "wl" : ""}">${l}</span>`).join("")}</div>`;
-  html += top.map((r) => leaderRow(r, cols, cat)).join("");
-  if (mine) html += `<div class="cut"><span>лучший в команде</span></div>${leaderRow(mine, cols, cat)}`;
-  html += `</div>`;
-  if (!top.length) html += `<div class="empty">Список появится после первых матчей</div>`;
-  const legend = LEAD_LEGEND[cat] || LEAD_LEGEND.pts;
-  html += `<div class="foot">${legend}.<br>${past
-    ? `Статистика регулярного чемпионата ${esc(d.league)} ${esc(d.season)} с сайта лиги. Клубы — под нынешними названиями. Лидеры сезона ${esc(state.data.season)} появятся после первого тура.`
+  let html = leadSeason(d);
+  html += `<div class="lead-grid">${Object.keys(LEAD_CATS).map((cat) =>
+    leadCard(cat, (d.categories[cat] || []).find((r) => r.rank === 1))).join("")}</div>`;
+  html += mineBlock(d);
+  html += `<div class="foot">Нажмите на карточку — будет топ-10.<br>${past
+    ? `Регулярный чемпионат ${esc(d.league)} ${esc(d.season)}, статистика с сайта лиги, клубы — под нынешними названиями. Лидеры сезона ${esc(state.data.season)} появятся после первого тура.`
     : "Места — как в статистике на сайте лиги."}</div>`;
   return html;
+}
+
+// Топ-10 показателя — в листе снизу, как карточка матча: одно число в строке, остальное — подписью
+function leaderRow(cat, r) {
+  return `<div class="row lead-row${r.team && r.team === state.fav ? " me" : ""}">
+    <span class="lr-rank num">${r.rank}</span>
+    ${r.team ? emblem(r.team) : '<span class="em blank" aria-hidden="true"></span>'}
+    <span class="lr-who"><b>${esc(r.name)}</b><small>${esc(clubOf(r))} · ${esc(LEAD_CATS[cat].sub(r))}</small></span>
+    <span class="lr-val num">${leadValue(cat, r[cat])}</span>
+  </div>`;
+}
+
+function openLeaders(cat) {
+  const d = state.leaders;
+  const c = LEAD_CATS[cat];
+  if (!d || !c) return;
+  const rows = d.categories[cat] || [];
+  const top = rows.filter((r) => r.rank <= 10);
+  const mine = state.fav && !top.some((r) => r.team === state.fav) && rows.find((r) => r.team === state.fav);
+  let html = `<div class="grab"></div>
+    <div class="sheet-head"><span class="when">${esc(d.league)} ${esc(d.season)}${d.season !== state.data.season ? " · прошлый сезон" : ""}</span>
+    <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
+    <h2 class="lead-title">${c.title}<span>топ-10</span></h2>
+    <div class="list">${top.map((r) => leaderRow(cat, r)).join("")}`;
+  if (mine) html += `<div class="cut"><span>лучший в команде</span></div>${leaderRow(cat, mine)}`;
+  html += `</div>`;
+  if (LEAD_NOTE[cat]) html += `<div class="foot">${LEAD_NOTE[cat]}</div>`;
+  showSheet(html);
 }
 
 // Сетка клубов по конференциям: первый запуск (attr = data-pick) и лист смены команды (data-switch)
@@ -1516,7 +1572,7 @@ function confirmTeam(id = state.draft || state.fav) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-cat],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-open],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -1625,25 +1681,25 @@ document.addEventListener("click", (e) => {
     haptic();
     return refreshTable();
   }
-  if (el.dataset.leadCat) {
-    state.leadCat = el.dataset.leadCat;
-    haptic();
-    el.parentNode.querySelectorAll("[data-lead-cat]").forEach((b) => {
-      b.classList.toggle("on", b === el);
-      b.setAttribute("aria-pressed", b === el);
-    });
-    $("#table-body").innerHTML = leadersBody();
-    return fadeIn($("#table-body"));
-  }
+  if (el.dataset.leadOpen) return openLeaders(el.dataset.leadOpen);
   if (el.dataset.conf) {
+    // чип отвечает сразу, бегунок перетекает; таблица — в следующем кадре
+    if (el.dataset.conf === state.conf) return;
     state.conf = el.dataset.conf;
     haptic();
-    el.parentNode.querySelectorAll("[data-conf]").forEach((b) => {
+    const group = el.parentNode;
+    const prev = runnerState(group.parentNode)[group.dataset.run];
+    group.querySelectorAll("[data-conf]").forEach((b) => {
       b.classList.toggle("on", b === el);
       b.setAttribute("aria-pressed", b === el);
     });
-    $("#table-body").innerHTML = tableBody();
-    return fadeIn($("#table-body"));
+    placeRunner(group, prev);
+    return nextFrame(() => {
+      const box = $("#standings");
+      if (!box) return;
+      box.innerHTML = standingsTable();
+      fadeIn(box);
+    });
   }
   if (el.dataset.team) {
     state.cal = calFor(el.dataset.team);

@@ -467,29 +467,62 @@ h1, .display {
   text-transform: uppercase;
 }
 
-/* Лидеры лиги (ADR-009): те же строки таблицы, вместо команды — игрок и его клуб */
+/* Шапка «Таблицы» — только сегменты; конференции — лёгкие чипы под ней (DESIGN.md) */
 .table-seg { margin-top: 16px; }
-.table-seg + .pills { margin-top: 8px; }
-/* Пилюли во всю ширину равными долями: ничего не прячется за краем */
-.pills.fill { display: grid; grid-template-columns: repeat(var(--n), 1fr); overflow: visible; }
-.pills.fill button { min-width: 0; padding: 10px 6px; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 359px) {
-  .pills.fill { gap: 4px; }
-  .pills.fill button { padding: 10px 2px; font-size: 11.5px; letter-spacing: 0; }
+.chips.fill { margin: -4px 0 12px; }
+.chips.fill button { flex: 1 1 0; }
+
+/* Лидеры лиги (ADR-009): карточки-наклейки, одно надутое число на карточку */
+.lead-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 8px; padding-top: 6px; }
+.lead-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: 156px;
+  padding: 14px 14px 12px;
+  border: var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: transform .12s cubic-bezier(.2, .8, .2, 1), background-color .12s;
 }
-.lead-row { display: flex; cursor: default; }
-.lead-row > span { flex: none; width: 36px; }
-.lead-row > .pos { width: 24px; }
-.lead-row > .pl { flex: 1 1 auto; width: auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; text-align: left; }
-.lead-row .pl b { font: 700 14px/1.15 var(--ui); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.lead-row .pl small { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: 500 12px/1.2 var(--ui); }
-.lead-row .pl small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lead-row .pl .em { width: 16px; height: 16px; }
-.lead-row.head .pl { display: block; }
-.lead-row.me .pl b { font-weight: 800; }
+.lead-card:active { transform: scale(.97); background: var(--sel); }
+.lead-card.me { background: var(--sel); }
+.lc-cat { font: 700 11px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding-right: 22px; }
+/* эмблема лидера наклеена на угол карточки, чуть за край — как стикер */
+.lc-em { position: absolute; top: -8px; right: -6px; }
+.lc-em .em.md { width: 36px; height: 36px; transform: rotate(-8deg); }
 @media (max-width: 359px) {
-  .lead-row .wl { display: none; }
+  .lc-cat { font-size: 10px; letter-spacing: .02em; }
 }
+.lc-val { margin-top: auto; padding-top: 10px; font: 800 34px/0.9 var(--display); letter-spacing: -0.01em; font-feature-settings: normal; }
+.lc-unit { margin-top: 3px; font: 500 12px/1.2 var(--ui); color: var(--muted); }
+.lc-name { margin-top: 10px; width: 100%; font: 500 13px/1.2 var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-name b { font-weight: 700; }
+.lc-club { width: 100%; font: 500 12px/1.3 var(--ui); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-card.empty-card { cursor: default; border-style: dashed; border-color: var(--edge-strong); }
+.lc-none { margin-top: auto; font: 500 13px/1.3 var(--ui); color: var(--muted); }
+
+/* Свои в лидерах и топ-10 в листе: место, игрок, одно число справа */
+.mine-row { grid-template-columns: 28px 1fr; }
+.lead-row { grid-template-columns: 22px 24px 1fr auto; cursor: default; }
+.lead-row:active { background: none; }
+.ml-rank, .lr-rank { font: 800 14px/1 var(--display); }
+.ml-who, .lr-who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ml-who b, .lr-who b { font: 700 15px/1.2 var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lr-who small { font: 500 12px/1.25 var(--ui); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ml-who small { font: 500 12px/1.35 var(--ui); color: var(--muted); }
+.lr-val { font: 800 18px/1 var(--display); }
+.lead-row.me { background: var(--sel); }
+.em.blank { background: var(--mist); border-color: var(--mist); }
+.lead-title { display: flex; align-items: baseline; gap: 10px; margin: 4px 2px 14px; font: 800 26px/0.95 var(--display); }
+.lead-title span { font: 700 12px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+#sheet .list .cut span { right: 12px; }
 
 /* ---------- выбор команды ---------- */
 
@@ -892,13 +925,13 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
 .btn:not(:disabled):active, .pills button:active, .pick:active, .btn-round:active, .retry:active { transform: scale(.97); }
 .board-card.tap:active { transform: scale(.985); }
 .row, .st-row, .menu-row { transition: background-color .12s; }
-.st-row:not(.head):not(.lead-row):active, .seg button:not(.on):active, .chips button:not(.on):active { background: var(--sel); }
+.st-row:not(.head):active, .seg button:not(.on):active, .chips button:not(.on):active { background: var(--sel); }
 /* В прокручиваемом нажатие проявляется через 60 мс: если палец начал прокрутку, строка не мигает */
 :is(.row, .st-row, .menu-row, .board-card.tap, .pick, .pills button):active { transition-delay: 60ms; }
 
 /* Наведение — только там, где есть мышь, иначе на телефоне подсветка залипает */
 @media (hover: hover) and (pointer: fine) {
-  .row:not(.static):hover, .st-row:not(.head):not(.lead-row):hover, .menu-row:hover, .board-card.tap:hover,
+  .row:not(.static):not(.lead-row):hover, .lead-card:hover, .st-row:not(.head):hover, .menu-row:hover, .board-card.tap:hover,
   .pick:not(.on):hover, .pills button:not(.on):hover, .btn-round:hover, .btn.ghost:hover, .retry:hover { background: var(--sel); }
   .seg button:not(.on):hover, .chips button:not(.on):hover, .tabs button:not(.active):hover { background: var(--mist); }
   .btn:not(.ghost):not(:disabled):hover { opacity: .88; }
