@@ -20,7 +20,6 @@ OFFICIAL_TEAM = "ryazan-vdv"          # у кого из команд есть �
 HISTORY_FILE = BASE / "history.json"
 HISTORY_PROTOCOLS = BASE / "history_protocols.json"   # протоколы матчей из «Последних встреч» (ADR-008)
 HIDDEN_FILE = BASE / "hidden_players.json"
-CAP_DIR = BASE / "webapp" / "cap"   # позы Кэпа, проводника по мини-аппу (ADR-010)
 KITS_FILE = BASE / "art" / "players" / "kits.json"   # форма клубов для стикеров игроков, tools/player_kits.py
 PAST_CLUBS_FILE = BASE / "past_clubs.json"   # клубы прошлых сезонов, которых нет в РХЛ: эмблемы для лидеров (ADR-009)
 OUT = BASE / "webapp" / "data" / "league.json"
@@ -612,13 +611,12 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results,
             "results": "протоколы лиги",
         },
         "links": links(),
-        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo") if k in t} for t in teams.all],
+        # colors — цвета формы: в них переодевается Кэп (ADR-010)
+        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo", "colors") if k in t} for t in teams.all],
         "games": games,
         "standings": standings(teams, games),
         # форма клубов для стикеров игроков: составы в разборе матча и лидеры (ADR-009)
         "kits": load_kits(),
-        # какие позы Кэпа уже нарисованы; пока их нет — Кэп в виде круглого стикера (ADR-010)
-        "cap": sorted(p.stem for p in CAP_DIR.glob("*.webp")),
     }
     return data, unmatched, details
 

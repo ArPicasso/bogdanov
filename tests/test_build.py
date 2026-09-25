@@ -381,7 +381,7 @@ class Leaders(unittest.TestCase):
         """Форма клубов — в league.json: её берут и лидеры, и составы в разборе матча."""
         data, _, _ = b.build(self.teams, [], {})
         self.assertEqual(data["kits"], b.load_kits())
-        self.assertEqual(data["cap"], sorted(p.stem for p in b.CAP_DIR.glob("*.webp")))   # позы Кэпа (ADR-010)
+        self.assertTrue(all(len(t["colors"]) == 2 for t in data["teams"]))   # цвета формы для Кэпа (ADR-010)
         self.assertNotIn("kits", b.leaders(self.teams, self.src))
 
     def test_every_club_has_both_kits(self):

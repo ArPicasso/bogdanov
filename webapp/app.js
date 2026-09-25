@@ -880,16 +880,61 @@ function renderOnboarding() {
 const TOUR_KEY = "tour_done";
 const tourDone = () => lsGet(TOUR_KEY) === "1";
 
-// Поза Кэпа — webapp/cap/<поза>.webp (список собирает build_data.py). Пока поз нет — круглый
-// стикер полевого с номером 26 (сезон 2026/27). С выбранным клубом Кэп «в его форме»: без поз —
-// сам стикер в форме клуба, с позами — такой стикер наклеен рядом
+// Кэп — пингвин из простых фигур в стиле стикеров бота (stickers/stickers.html): плоские цвета
+// Slush, чёрный контур, белая вырезанная кайма. Позы — поворот крыльев и предмет в кадре.
+// С выбранным клубом он «в его форме»: шлем — основной цвет клуба, полоса и нашивка «К» — второй
+// (teams.json → colors). Нарисован кодом: чёткий на любом размере и одинаковый в обеих темах
+const CAP_FLIP = {   // насколько правое и левое крыло подняты от тела наружу, градусы
+  hello: [135, 10], point: [40, 10], thumbs: [110, 10], shrug: [75, 75], wait: [28, 10], cheer: [150, 150],
+};
+function capSvg(pose = "hello", colors = null) {
+  const [main, second] = colors || ["#4da2ff", "#55db9c"];
+  const onSecond = lum(second) < 0.5 ? "#fff" : "#000";
+  const [r, l] = CAP_FLIP[pose] || CAP_FLIP.hello;
+  const flip = (side, a) => {
+    const x = side > 0 ? 146 : 54;
+    return `<path transform="rotate(${-side * a} ${x} 112)" d="M${x} 108 c${side * 18} 10 ${side * 26} 34 ${side * 22} 58 c${-side * 12} -8 ${-side * 22} -26 ${-side * 26} -46 z" fill="#000" stroke="#000" stroke-width="5" stroke-linejoin="round"/>`;
+  };
+  const extra = {
+    thumbs: `<g transform="translate(150 22) rotate(14)"><path d="m20 2 5 11 12 1.5-9 8 2.5 12L20 28.5 9.5 34.5l2.5-12-9-8 12-1.5z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
+    cheer: `<g transform="translate(146 10) rotate(14)"><path d="m20 2 5 11 12 1.5-9 8 2.5 12L20 28.5 9.5 34.5l2.5-12-9-8 12-1.5z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>
+      <g transform="translate(14 22) rotate(-16)"><path d="M2 12 v8 a22 9 0 0 0 44 0 v-8 z" fill="#000"/><ellipse cx="24" cy="12" rx="22" ry="9" fill="#000" stroke="#fff" stroke-width="2.5"/></g>`,
+    shrug: `<g transform="translate(150 30) rotate(10)"><rect width="30" height="30" rx="15" fill="#e9ccff" stroke="#000" stroke-width="4"/><text x="15" y="22" text-anchor="middle" font-family="Unbounded, sans-serif" font-weight="800" font-size="18">?</text></g>`,
+    wait: `<g transform="translate(150 60) rotate(12)"><path d="M6 0 L30 118 Q33 128 44 128 L58 128 L58 138 L40 138 Q24 138 20 124 L-4 4 Z" fill="#e9ccff" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
+    point: `<g transform="translate(160 176) rotate(-30)"><path d="M0 0 h16 v12 h10 l-18 18 l-18 -18 h10 z" fill="#fb4903" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
+    hello: "",
+  }[pose] || "";
+  return `<svg class="cap-svg" viewBox="-6 -6 212 232" aria-hidden="true">
+    <defs><filter id="cap-cut-${pose}" x="-10%" y="-10%" width="120%" height="120%">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="5" result="w"/><feFlood flood-color="#fff"/><feComposite in2="w" operator="in" result="white"/>
+      <feMorphology in="SourceAlpha" operator="dilate" radius="6.5" result="b"/><feFlood flood-color="#000"/><feComposite in2="b" operator="in" result="black"/>
+      <feMerge><feMergeNode in="black"/><feMergeNode in="white"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <g filter="url(#cap-cut-${pose})">
+      ${flip(-1, l)}${flip(1, r)}
+      <ellipse cx="82" cy="206" rx="17" ry="8" fill="#fb4903" stroke="#000" stroke-width="4"/>
+      <ellipse cx="118" cy="206" rx="17" ry="8" fill="#fb4903" stroke="#000" stroke-width="4"/>
+      <path d="M100 26 C 56 26, 44 78, 46 128 C 48 178, 70 204, 100 204 C 130 204, 152 178, 154 128 C 156 78, 144 26, 100 26 Z" fill="#000"/>
+      <ellipse cx="100" cy="142" rx="38" ry="54" fill="#fff"/>
+      <path d="M70 84 C 70 66, 84 58, 100 62 C 116 58, 130 66, 130 84 C 130 100, 116 108, 100 106 C 84 108, 70 100, 70 84 Z" fill="#fff"/>
+      <circle cx="89" cy="82" r="4.5" fill="#000"/><circle cx="111" cy="82" r="4.5" fill="#000"/>
+      <path d="M91 92 H109 L100 104 Z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M56 70 C 56 36, 78 20, 100 20 C 122 20, 144 36, 144 70 Z" fill="${main}" stroke="#000" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M92 21 H108 V69 H92 Z" fill="${second}" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
+      <rect x="52" y="64" width="96" height="10" rx="5" fill="#000"/>
+      <circle cx="124" cy="132" r="15" fill="${second}" stroke="#000" stroke-width="4"/>
+      <text x="124" y="139" text-anchor="middle" font-family="Unbounded, sans-serif" font-weight="800" font-size="18" fill="${onSecond}">К</text>
+      ${extra}
+    </g></svg>`;
+}
+
+// Относительная яркость цвета #rrggbb: какой текст на нём читается
+function lum(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+}
+
 function capFig(pose, club) {
-  const bust = () => figure({ kit: club || null, role: "F", number: 26 });
-  if (state.data && state.data.cap && state.data.cap.includes(pose)) {
-    const kit = club ? `<span class="ps cap-kit">${bust()}</span>` : "";
-    return `<span class="cap"><img class="cap-img" src="cap/${pose}.webp" alt="" decoding="async">${kit}</span>`;
-  }
-  return `<span class="cap"><span class="ps cap-ps">${bust()}</span></span>`;
+  return `<span class="cap">${capSvg(pose, club ? team(club).colors : null)}</span>`;
 }
 
 function capOnbText(club) {
