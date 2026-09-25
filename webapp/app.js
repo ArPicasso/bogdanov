@@ -1512,6 +1512,7 @@ function go(tab) {
 
 function confirmTeam(id = state.draft || state.fav) {
   if (!id) return;
+  const wasFav = state.fav;
   const dir = state.fav ? tabDir(state.tab, "home") : 1;
   state.fav = id;
   state.draft = null;
@@ -1519,7 +1520,8 @@ function confirmTeam(id = state.draft || state.fav) {
   state.conf = team(id).conf;
   saveFav(id);
   closeMatch();
-  state.tab = "home";
+  // пришёл по ссылке на лидеров и только что выбрал команду — ведём туда, куда звали
+  state.tab = !wasFav && state.tableView === "players" ? "table" : "home";
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render(dir);
 }
@@ -1697,6 +1699,13 @@ function matchParam() {
   return q.get("match") || (/^m-/.test(sp) ? sp.slice(2) : null);
 }
 
+// Ссылка на лидеров лиги из бота: ?view=leaders или startapp=leaders (ADR-009)
+function leadersParam() {
+  const fromTg = inTelegram && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+  const q = new URLSearchParams(location.search);
+  return q.get("view") === "leaders" || (fromTg || q.get("tgWebAppStartParam") || q.get("startapp")) === "leaders";
+}
+
 function pickFav(id) {
   state.fav = id;
   state.cal.team = id;
@@ -1790,6 +1799,12 @@ function boot(d, cached = false) {
     pickFav(fav);
     if (fromLink === fav && fav !== saved) saveFav(fav);
     else rememberSplash(fav);
+  }
+  // Из бота — сразу «Таблица → Игроки». Новичок сначала выбирает команду, потом попадает туда же
+  if (leadersParam() && !state.openedFromLink) {
+    state.openedFromLink = true;
+    state.tab = "table";
+    state.tableView = "players";
   }
   render();
   hideSplash(cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS);

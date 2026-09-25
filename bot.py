@@ -34,6 +34,7 @@ REMIND_TODAY_AT = time(10, 0)      # утром в день игры
 REMIND_TOMORROW_AT = time(19, 0)   # вечером накануне
 REMIND_TEAM = "Рязань-ВДВ"         # напоминания пока только о её матчах: games.json
 RESULTS_POLL = 600                 # раз в 10 минут смотрим опубликованные результаты мини-аппа
+LEADERS_TTL = 600                  # лидеров лиги перечитываем не чаще раза в 10 минут (ADR-009)
 RESULTS_FRESH_DAYS = 2             # матчи старше не присылаем
 QUIET_FROM, QUIET_TO = time(23, 0), time(9, 0)   # ночью молчим, результат уйдёт утром
 
@@ -91,19 +92,22 @@ def emoji_off(err: Exception) -> bool:
 
 B_APP = "Открыть РХЛ"
 B_RECAP = "Как это было"
+B_LEADERS = "Все лидеры"
 
 # видно в пустом чате до «Старт» и в профиле бота (до 512 и 120 символов)
 DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.\n\n"
                "🏒 Календарь всех 26 команд, таблица и счёт матчей — в приложении\n"
+               "🏆 Лучшие игроки лиги: бомбардиры, снайперы, вратари\n"
                "🔔 Напоминания перед играми\n\n"
                "Жми «Старт» 👇")
 SHORT_DESCRIPTION = "РХЛ U21: календарь, таблица и счёт матчей. Напомню перед игрой 🏒"
 
 
-def app_url(team: str | None = None, match: str | None = None) -> str:
+def app_url(team: str | None = None, match: str | None = None, view: str | None = None) -> str:
     """Адрес мини-аппа; с командой — ?team=<id>, мини-апп выберет её, если своей ещё нет.
-    С матчем — ?match=<id>, мини-апп сразу откроет его карточку (ADR-008)."""
-    extra = [(k, v) for k, v in (("team", team), ("match", match)) if v]
+    С матчем — ?match=<id>, мини-апп сразу откроет его карточку (ADR-008).
+    С view=leaders — сразу «Таблица → Игроки» (ADR-009)."""
+    extra = [(k, v) for k, v in (("team", team), ("match", match), ("view", view)) if v]
     if not extra:
         return WEBAPP_URL
     u = urlsplit(WEBAPP_URL)
@@ -130,13 +134,63 @@ def recap_kb(match: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 
+def leaders_kb() -> InlineKeyboardMarkup:
+    """Одна кнопка — лидеры лиги в мини-аппе."""
+    web_app = WebAppInfo(url=app_url(view="leaders"))
+    if "cup" in CUSTOM:
+        btn = InlineKeyboardButton(text=B_LEADERS, icon_custom_emoji_id=CUSTOM["cup"], web_app=web_app)
+    else:
+        btn = InlineKeyboardButton(text=f"{EMOJI['cup']} {B_LEADERS}", web_app=web_app)
+    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
+
+
+def _pm(v: int) -> str:
+    return f"+{v}" if v > 0 else f"−{-v}" if v < 0 else "0"
+
+
+def leaders_text(data: dict | None, season: str = "2026/27") -> str:
+    """Коротко о лидерах лиги (ADR-009): тройка бомбардиров и первый в остальных списках.
+    data — опубликованный мини-аппом data/leaders.json; нет его — просто ведём в приложение."""
+    cats = (data or {}).get("categories") or {}
+    if not cats.get("pts"):
+        return f"{e('cup')} Лучшие игроки лиги — в приложении.\nЖми кнопку 👇"
+
+    def who(r: dict) -> str:
+        club = TEAMS.get(r.get("team"), r.get("club", ""))
+        return f"{html.escape(r['name'])} ({html.escape(club)})" if club else html.escape(r["name"])
+
+    past = data.get("season") != season
+    head = f"{e('cup')} <b>Лидеры {html.escape(data.get('league', ''))} {html.escape(data.get('season', ''))}</b>"
+    lines = [head + (" · прошлый сезон" if past else ""), "", "<b>Бомбардиры</b>"]
+    lines += [f"{r['rank']}. {who(r)} — {r['pts']} {plural(r['pts'], 'очко', 'очка', 'очков')}"
+              for r in cats["pts"] if r["rank"] <= 3]
+    firsts = [("g", "Снайпер", lambda r: f"{r['g']} {plural(r['g'], 'гол', 'гола', 'голов')}"),
+              ("pm", "Плюс-минус", lambda r: _pm(r["pm"])),
+              ("sv_pct", "Вратарь", lambda r: f"{r['sv_pct']:.1f}% отражённых".replace(".", ","))]
+    top = [(label, next((r for r in cats.get(k, []) if r["rank"] == 1), None), fmt) for k, label, fmt in firsts]
+    if any(r for _, r, _ in top):
+        lines.append("")
+        lines += [f"{label}: {who(r)} — {fmt(r)}" for label, r, fmt in top if r]
+    if past:
+        lines += ["", f"Лидеры сезона {season} появятся после первого тура."]
+    return "\n".join(lines) + "\n\nСнайперы, ассистенты, вратари и штраф — топ-10 по кнопке 👇"
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    a, b = n % 10, n % 100
+    if a == 1 and b != 11:
+        return one
+    return few if 2 <= a <= 4 and not 12 <= b <= 14 else many
+
+
 def welcome_text(team: str | None = None) -> str:
     head = (f"Здарова! Открываю РХЛ с командой <b>«{html.escape(TEAMS[team])}»</b> {e('rhl')}" if team
             else f"Здарова! Это РХЛ U21 — всё про лигу в одном месте {e('rhl')}")
     return (f"{head}\n\n"
             f"{e('star')} Календарь 26 команд\n"
             f"{e('cup')} Таблица конференций\n"
-            f"{e('goal')} Счёт и голы матчей\n\n"
+            f"{e('goal')} Счёт и голы матчей\n"
+            f"{e('fire')} Лучшие игроки лиги\n\n"
             "<b>Жми «Открыть РХЛ»</b> 👇 и выбери, за кого болеешь.")
 
 
@@ -243,8 +297,36 @@ async def start(m: Message, command: CommandObject):
     if command.args == "remind":   # из мини-аппа, экран «Я» (ADR-004)
         await say(m.bot, cid, lambda: (remind_text(cid), remind_kb(cid)))
         return
+    if command.args == "leaders":   # ссылка t.me/<бот>?start=leaders (ADR-009)
+        await send_leaders(m)
+        return
     team = command.args if command.args in TEAMS else None
     await say(m.bot, cid, lambda: (welcome_text(team), app_kb(team)))
+
+
+# Лидеры меняются раз в час, вместе с мини-аппом: держим последний файл 10 минут
+_leaders: dict = {"at": None, "data": None}
+
+
+async def published_leaders() -> dict | None:
+    now = datetime.now(TZ)
+    if _leaders["at"] and now - _leaders["at"] < timedelta(seconds=LEADERS_TTL):
+        return _leaders["data"]
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), trust_env=True) as session:
+        data = await fetch_json(session, "leaders.json")
+    if data:
+        _leaders.update(at=now, data=data)
+    return data or _leaders["data"]
+
+
+async def send_leaders(m: Message) -> None:
+    data = await published_leaders()
+    await say(m.bot, m.chat.id, lambda: (leaders_text(data), leaders_kb()))
+
+
+@dp.message(Command("leaders"))   # в меню команд её нет (ADR-005), только ссылкой или руками
+async def h_leaders(m: Message):
+    await send_leaders(m)
 
 
 @dp.message(Command("remind"))
