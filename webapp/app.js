@@ -39,7 +39,7 @@ const state = {
   fav: null,
   draft: null,
   tab: "home",
-  cal: { team: null, side: "all" },
+  cal: { team: null, side: "all", conf: "all" },
   conf: "east",
   scrolledToNext: false,
 };
@@ -231,15 +231,37 @@ function periodsLine(g) {
   return `<div class="periods">${g.score.periods.map((p) => `<span class="num">${p[0]}:${p[1]}</span>`).join("")}</div>`;
 }
 
-function gameRow(g, next) {
+// Строка календаря одной команды: команда уже названа фильтром, в строке — только соперник
+function gameRow(g, me, next) {
   const d = parseISO(g.date);
+  const past = !!g.score;
+  const home = g.home === me;
+  const opp = home ? g.away : g.home;
+  const where = home
+    ? '<span class="where home">Дома</span>'
+    : `<span class="where away">Выезд</span><span class="city">${esc(team(g.home).city)}</span>`;
+  let right = `<span class="kick">${g.time ? esc(g.time) : ""}</span>`;
+  if (past) {
+    const mine = home ? g.score.home : g.score.away;
+    const their = home ? g.score.away : g.score.home;
+    const res = me === state.fav ? resultPill(g) : "";
+    right = `<span class="sc num">${mine}:${their}</span>${res}`;
+  }
+  return `<div class="row one${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
+    <div class="date"><b>${d.getUTCDate()}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
+    <div class="t"><div>${emblem(opp)}<span class="nm">${esc(team(opp).name)}</span></div><div class="sub">${where}</div></div>
+    <div class="r">${right}</div>
+  </div>`;
+}
+
+// Строка «Вся лига»: без даты — её даёт подзаголовок дня
+function leagueRow(g) {
   const past = !!g.score;
   const lead = (id) => (id === g.home ? g.score.home > g.score.away : g.score.away > g.score.home);
   const goals = (id) => (past ? `<span class="gl${lead(id) ? " lead" : ""}">${id === g.home ? g.score.home : g.score.away}</span>` : "");
   const line = (id) => `<div>${emblem(id)}<span class="nm${id === state.fav ? " me" : ""}">${esc(team(id).name)}</span>${goals(id)}</div>`;
   const right = past ? resultPill(g) : `<span class="kick">${g.time ? esc(g.time) : ""}</span>`;
-  return `<div class="row${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
-    <div class="date"><b>${d.getUTCDate()}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
+  return `<div class="row two${past ? " past" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0">
     <div class="t">${line(g.home)}${line(g.away)}</div>
     <div class="r">${right}</div>
   </div>`;
@@ -316,39 +338,46 @@ function renderHome() {
 
   if (upcoming.length) {
     html += `<div class="label">Дальше<button type="button" class="aside link" data-tab="calendar">Весь календарь</button></div>
-      <div class="list">${upcoming.map((g) => gameRow(g, false)).join("")}</div>`;
+      <div class="list">${upcoming.map((g) => gameRow(g, me, false)).join("")}</div>`;
   }
   return html + footer();
 }
 
-function renderCalendar() {
-  const teamId = state.cal.team;
-  let list = teamId ? gamesOf(teamId) : games();
-  if (teamId && state.cal.side !== "all") {
-    list = list.filter((g) => (state.cal.side === "home" ? g.home === teamId : g.away === teamId));
-  }
-  const other = teamId && teamId !== state.fav;
-  const opts = state.data.teams
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
-    .map((t) => `<option value="${esc(t.id)}"${t.id === teamId && other ? " selected" : ""}>${esc(t.name)}</option>`)
-    .join("");
+function calFor(id) {
+  return { team: id || null, side: "all", conf: "all" };
+}
 
-  let html = `<section class="band lavender"><h1>Календарь</h1>
-    <div class="pills">
-      <button class="${teamId === state.fav ? "on" : ""}" data-cal-team="${esc(state.fav)}">Моя команда</button>
-      <button class="${!teamId ? "on" : ""}" data-cal-team="">Вся лига</button>
-      <select class="${other ? "on" : ""}" id="cal-team-select" aria-label="Другая команда"><option value="">Другая…</option>${opts}</select>
+function segBtn(on, attrs, inner) {
+  return `<button type="button" class="${on ? "on" : ""}" ${attrs} aria-pressed="${on}">${inner}</button>`;
+}
+
+function renderCalendar() {
+  const { team: teamId, side, conf } = state.cal;
+  let list = teamId ? gamesOf(teamId) : games();
+  if (teamId && side !== "all") list = list.filter((g) => (side === "home" ? g.home === teamId : g.away === teamId));
+  if (!teamId && conf !== "all") list = list.filter((g) => team(g.home).conf === conf || team(g.away).conf === conf);
+  const other = teamId && teamId !== state.fav;
+  const chev = '<svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
+
+  // Вторичный фильтр всегда на месте: у команды — дом/выезд, у лиги — конференция. Высота полосы не прыгает
+  const sub = teamId
+    ? [["all", "Все"], ["home", "Дома"], ["away", "Выезд"]].map(([k, v]) => segBtn(side === k, `data-cal-side="${k}"`, v))
+    : [["all", "Все"], ["east", "Восток"], ["west", "Запад"]].map(([k, v]) => segBtn(conf === k, `data-cal-conf="${k}"`, v));
+  const otherName = other ? esc(team(teamId).name) : "Другая";
+
+  let html = `<section class="band lavender split"><h1>Календарь</h1></section>
+    <div class="filterbar">
+      <div class="seg" role="group" aria-label="Чей календарь">
+        ${segBtn(teamId === state.fav, `data-cal-team="${esc(state.fav)}"`, "<span>Моя команда</span>")}
+        ${segBtn(!teamId, 'data-cal-team=""', "<span>Вся лига</span>")}
+        ${segBtn(other, 'data-cal-other aria-haspopup="dialog"', `<span>${otherName}</span>${chev}`)}
+      </div>
+      <div class="chips" role="group" aria-label="${teamId ? "Где играют" : "Конференция"}">${sub.join("")}</div>
     </div>`;
-  if (teamId) {
-    html += `<div class="pills">${[["all", "Все"], ["home", "Дома"], ["away", "Выезд"]]
-      .map(([k, v]) => `<button class="${state.cal.side === k ? "on" : ""}" data-cal-side="${k}">${v}</button>`)
-      .join("")}</div>`;
-  }
-  html += `</section>`;
 
   const nextId = (list.find(isUpcoming) || {}).id;
   let month = "";
+  let day = "";
   for (const g of list) {
     const m = g.date.slice(0, 7);
     if (m !== month) {
@@ -357,8 +386,19 @@ function renderCalendar() {
       const count = list.filter((x) => x.date.slice(0, 7) === m).length;
       html += `<div class="label">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">`;
       month = m;
+      day = "";
     }
-    html += gameRow(g, g.id === nextId);
+    if (teamId) {
+      html += gameRow(g, teamId, g.id === nextId);
+    } else {
+      if (g.date !== day) {
+        day = g.date;
+        const next = list.some((x) => x.id === nextId && x.date === day);
+        const today = daysFromToday(day) === 0;
+        html += `<div class="day${next ? " next" : ""}"${next ? ' id="next-anchor"' : ""}><span>${esc(fmtLong(day))}</span>${today ? '<span class="tag today">Сегодня</span>' : ""}</div>`;
+      }
+      html += leagueRow(g);
+    }
   }
   if (month) html += `</div>`;
   if (!list.length) html += `<div class="empty">Матчей нет</div>`;
@@ -486,6 +526,15 @@ function openTeamSheet() {
     <div class="sheet-head"><span class="when">Сменить команду</span>
     <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
     ${teamGrid(state.fav, "data-switch")}`;
+  showSheet(html);
+}
+
+// Тот же лист из Календаря: выбор показывает календарь клуба, любимая команда не меняется
+function openCalSheet() {
+  const html = `<div class="grab"></div>
+    <div class="sheet-head"><span class="when">Календарь команды</span>
+    <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
+    ${teamGrid(state.cal.team, "data-cal-pick")}`;
   showSheet(html);
 }
 
@@ -637,7 +686,7 @@ function confirmTeam(id = state.draft || state.fav) {
   if (!id) return;
   state.fav = id;
   state.draft = null;
-  state.cal = { team: id, side: "all" };
+  state.cal = calFor(id);
   state.conf = team(id).conf;
   saveFav(id);
   closeMatch();
@@ -647,7 +696,7 @@ function confirmTeam(id = state.draft || state.fav) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -673,9 +722,16 @@ document.addEventListener("click", (e) => {
     haptic();
     return render();
   }
-  if (el.dataset.calTeam !== undefined) {
-    state.cal = { team: el.dataset.calTeam || null, side: "all" };
+  if (el.hasAttribute("data-cal-other")) return openCalSheet();
+  if (el.dataset.calTeam !== undefined || el.dataset.calPick) {
+    state.cal = calFor(el.dataset.calPick || el.dataset.calTeam);
     state.scrolledToNext = false;
+    closeMatch();
+    haptic();
+    return render();
+  }
+  if (el.dataset.calConf) {
+    state.cal.conf = el.dataset.calConf;
     haptic();
     return render();
   }
@@ -690,7 +746,7 @@ document.addEventListener("click", (e) => {
     return render();
   }
   if (el.dataset.team) {
-    state.cal = { team: el.dataset.team, side: "all" };
+    state.cal = calFor(el.dataset.team);
     state.scrolledToNext = false;
     state.tab = "calendar";
     return render();
@@ -703,14 +759,6 @@ document.addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) {
     e.preventDefault();
     e.target.click();
-  }
-});
-
-document.addEventListener("change", (e) => {
-  if (e.target.id === "cal-team-select" && e.target.value) {
-    state.cal = { team: e.target.value, side: "all" };
-    state.scrolledToNext = false;
-    render();
   }
 });
 
