@@ -801,12 +801,18 @@ function leadersBody() {
   return html;
 }
 
-// Стикер игрока вместо фото (ADR-009): картинка из webapp/players/ — полевой или вратарь,
-// номер на груди ставим сами, поэтому одна картинка годится всем
+// Стикер игрока вместо фото (ADR-009): полевой или вратарь в форме своего клуба (webapp/players/clubs/).
+// Номер ставим сами — туда, где на майке ровный участок, и цветом, который на ней читается
+// (tools/player_kits.py). Формы клуба нет — общий стикер из webapp/players/
 function figure(r) {
-  const goalie = r.role === "G";
-  const num = r.number != null ? `<b class="fig-num">${esc(r.number)}</b>` : "";
-  return `<span class="fig${goalie ? " goalie" : ""}" aria-hidden="true"><img src="players/${goalie ? "goalie" : "skater"}.webp" alt="" decoding="async">${num}</span>`;
+  const role = r.role === "G" ? "goalie" : "skater";
+  const kit = r.kit && state.leaders && state.leaders.kits && state.leaders.kits[r.kit];
+  const at = kit && kit[role];
+  const src = at ? `players/clubs/${esc(r.kit)}-${role}.webp` : `players/${role}.webp`;
+  // y — середина ровного участка груди; строка номера высотой 20% ширины, поэтому верх на 10% выше
+  const pos = at ? ` style="top:${(at[0] * 100 - 10).toFixed(1)}%;color:${at[1] === "#ffffff" ? "#fff" : "#000"}"` : "";
+  const num = r.number != null ? `<b class="fig-num"${pos}>${esc(r.number)}</b>` : "";
+  return `<span class="fig${role === "goalie" ? " goalie" : ""}" aria-hidden="true"><img src="${src}" alt="" decoding="async">${num}</span>`;
 }
 
 // Топ-10 показателя — в листе снизу, как карточка матча: одно число в строке, остальное — подписью
@@ -834,7 +840,7 @@ function openLeaders(cat) {
     <div class="list">${top.map((r) => leaderRow(cat, r)).join("")}`;
   if (mine) html += `<div class="cut"><span>лучший в команде</span></div>${leaderRow(cat, mine)}`;
   html += `</div>`;
-  html += `<div class="foot">Места — как в статистике на сайте лиги. Фото игроков не показываем: вместо них — фигура с номером.</div>`;
+  html += `<div class="foot">Места — как в статистике на сайте лиги. Фото игроков не показываем: вместо них — стикер в форме клуба с номером игрока.</div>`;
   showSheet(html);
 }
 
