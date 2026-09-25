@@ -160,5 +160,52 @@ class AfterMatch(unittest.TestCase):
         self.assertEqual((bot.REMIND_TODAY_AT, bot.REMIND_TOMORROW_AT), (time(10, 0), time(19, 0)))
 
 
+class Leaders(unittest.TestCase):
+    """ADR-009: лидеры лиги в боте — коротко и одной кнопкой в мини-апп."""
+    data = {"season": "2025/26", "league": "НМХЛ", "categories": {
+        "pts": [{"rank": i, "name": f"Игрок {i}", "pts": 80 - i, "team": "polet"} for i in range(1, 6)],
+        "g": [{"rank": 1, "name": "Снайпер <b>", "g": 39, "club": "Буран Мск"}],
+        "pm": [{"rank": 1, "name": "Плюс", "pm": 52, "team": "ermak"}],
+        "sv_pct": [{"rank": 1, "name": "Вратарь", "sv_pct": 94.4, "team": "ryazan-vdv"}],
+    }}
+
+    def test_button_opens_leaders(self):
+        with mock.patch.object(bot, "WEBAPP_URL", "https://x.github.io/app/"):
+            kb = bot.leaders_kb().inline_keyboard
+        self.assertEqual(kb[0][0].web_app.url, "https://x.github.io/app/?view=leaders")
+        self.assertIn("Все лидеры", kb[0][0].text)
+
+    def test_top_three_and_firsts(self):
+        text = bot.leaders_text(self.data)
+        self.assertIn("Лидеры НМХЛ 2025/26</b> · прошлый сезон", text)
+        self.assertIn("1. Игрок 1 (Полёт) — 79 очков", text)
+        self.assertIn("3. Игрок 3 (Полёт) — 77 очков", text)
+        self.assertNotIn("Игрок 4", text)
+        self.assertIn("Снайпер: Снайпер &lt;b&gt; (Буран Мск) — 39 голов", text)
+        self.assertIn("Плюс-минус: Плюс (Ермак) — +52", text)
+        self.assertIn("Вратарь: Вратарь (Рязань-ВДВ) — 94,4% отражённых", text)
+        self.assertIn("появятся после первого тура", text)
+
+    def test_current_season_has_no_note(self):
+        text = bot.leaders_text({**self.data, "season": "2026/27", "league": "РХЛ"})
+        self.assertNotIn("прошлый сезон", text)
+        self.assertNotIn("первого тура", text)
+
+    def test_no_data_still_points_to_app(self):
+        self.assertIn("в приложении", bot.leaders_text(None))
+        self.assertIn("в приложении", bot.leaders_text({"categories": {}}))
+
+    def test_plural(self):
+        self.assertEqual([bot.plural(n, "гол", "гола", "голов") for n in (1, 2, 5, 11, 21, 22)],
+                         ["гол", "гола", "голов", "голов", "гол", "гола"])
+
+    def test_published_file_reads(self):
+        """Настоящий файл лидеров, собранный build_data.py из leaders.json в git."""
+        import build_data
+        data = build_data.leaders(build_data.load_teams(), build_data.load_leaders())
+        text = bot.leaders_text(data)
+        self.assertIn("Султанов Реваль (Полёт) — 78 очков", text)
+
+
 if __name__ == "__main__":
     unittest.main()
