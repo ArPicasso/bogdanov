@@ -608,45 +608,281 @@ function h2hBlock(g) {
 
 let sheetOpener = null;   // куда вернуть фокус после закрытия карточки
 
+// ---------- разбор сыгранного матча (ADR-008) ----------
+
+const recaps = {};                 // id матча → data/matches/<id>.json, грузится при открытии карточки
+const recapLoading = {};
+const recapView = { id: null, tab: "goals", pens: false, side: "home", pick: null };
+
+function loadRecap(id) {
+  if (!recapLoading[id]) {
+    recapLoading[id] = fetch(`data/matches/${encodeURIComponent(id)}.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+      .then((d) => (recaps[id] = d))
+      .catch(() => { delete recapLoading[id]; return null; });
+  }
+  return recapLoading[id];
+}
+
+const secs = (t) => { const [m, s] = String(t).split(":").map(Number); return m * 60 + (s || 0); };
+const sideTeam = (g, side) => (side === "away" ? g.away : g.home);
+
+function strengthTag(x, i, d) {
+  if (x.period === "РБ") return `<span class="tag soft">победный буллит</span>`;
+  const st = x.strength && x.strength !== "рав." ? `<span class="tag">${esc(x.strength.replace(".", ""))}</span>` : "";
+  const gw = d && d.gw === i ? `<span class="tag soft">победная</span>` : "";
+  return st + gw;
+}
+
+// Ход матча: разница в счёте по минутам. Мятное — ведут хозяева, лавандовое — гости (DESIGN.md)
+function flowChart(g, d) {
+  const goals = (g.goals || []).map((x, i) => ({ ...x, i })).filter((x) => x.period !== "РБ");
+  if (!goals.length) return "";
+  const length = (d && d.length) || (g.score.decision ? 65 : 60);
+  let run = 0;
+  const leads = goals.map((x) => (run += x.team === "home" ? 1 : -1));
+  const up = Math.max(2, ...leads), dn = Math.max(2, ...leads.map((v) => -v));
+  const W = 340, x0 = 30, x1 = 334, u = 11, yc = 14 + up * u;
+  const X = (sec) => x0 + ((x1 - x0) * Math.min(sec, length * 60)) / (length * 60);
+  const Y = (v) => yc - v * u;
+  const bot = Y(-dn) + 4;
+  const lane = { home: bot + 20, away: bot + 34 };
+  const hAbbr = esc(team(g.home).abbr), aAbbr = esc(team(g.away).abbr);
+
+  const pts = [[X(0), yc]];
+  let diff = 0;
+  const dots = goals.map((x) => {
+    const px = X(secs(x.time));
+    pts.push([px, Y(diff)]);
+    diff += x.team === "home" ? 1 : -1;
+    pts.push([px, Y(diff)]);
+    return { x: px, y: Y(diff), g: x };
+  });
+  pts.push([X(length * 60), Y(diff)]);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const area = `${line} L${X(length * 60).toFixed(1)} ${yc} Z`;
+
+  const marks = [1200, 2400, 3600].filter((t) => t < length * 60);
+  const grid = marks.map((t) => `<line x1="${X(t)}" x2="${X(t)}" y1="${Y(up) - 4}" y2="${lane.away + 8}" class="fl-grid"/>`).join("");
+  const periods = [["1-й", 600], ["2-й", 1800], ["3-й", 3000]];
+  if (length > 60) periods.push(["ОТ", 3600 + (length - 60) * 30]);
+  const plabels = periods.map(([l, t]) => `<text class="fl-per" x="${X(t)}" y="${lane.away + 22}" text-anchor="middle">${l}</text>`).join("");
+
+  // удаление на 2/4/5 минут — полоса до конца штрафа или до гола в большинстве; остальные — точка
+  const pens = ((d && d.penalties) || []).map((p) => {
+    const s0 = secs(p.time);
+    let s1 = [2, 4, 5].includes(p.min) ? s0 + p.min * 60 : s0;
+    if (p.min === 2) {
+      const pp = goals.find((x) => x.team !== p.team && x.strength.startsWith("бол") && secs(x.time) > s0 && secs(x.time) < s1);
+      if (pp) s1 = secs(pp.time);
+    }
+    const w = Math.max(5, X(s1) - X(s0));
+    return `<rect x="${X(s0).toFixed(1)}" y="${lane[p.team] - 3}" width="${w.toFixed(1)}" height="6" rx="3" class="fl-pen"><title>${esc(p.time)} · ${esc(p.who)}, ${esc(p.min)} мин</title></rect>`;
+  }).join("");
+
+  const pick = recapView.pick;
+  const dotEls = dots.map((o) => {
+    const pp = o.g.strength && o.g.strength.startsWith("бол");
+    return `<g class="fl-dot${pp ? " pp" : ""}${o.g.i === pick ? " on" : ""}" data-recap-goal="${o.g.i}" role="button" tabindex="0" aria-label="${esc(`Гол ${o.g.time}, ${o.g.author}, счёт ${o.g.score}`)}"><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="14" class="hit"/><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="${o.g.i === pick ? 6 : 4.5}" class="v"/></g>`;
+  }).join("");
+
+  const cur = g.goals[pick] || goals[goals.length - 1];
+  const hasPens = d && d.penalties && d.penalties.length;
+  return `<div class="label">Ход матча<span class="aside">разница в счёте</span></div>
+  <div class="flow">
+    <svg viewBox="0 0 ${W} ${lane.away + 28}" role="img" aria-label="Разница в счёте по ходу матча">
+      <defs><clipPath id="fl-up"><rect x="0" y="0" width="${W}" height="${yc}"/></clipPath>
+        <clipPath id="fl-dn"><rect x="0" y="${yc}" width="${W}" height="${W}"/></clipPath></defs>
+      ${grid}
+      <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
+      <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
+      <line x1="${x0}" x2="${x1}" y1="${yc}" y2="${yc}" class="fl-axis"/>
+      <path d="${line}" class="fl-line"/>
+      <text class="fl-ax" x="${x0 - 6}" y="${Y(up) + 3}" text-anchor="end">+${up}</text>
+      <text class="fl-ax" x="${x0 - 6}" y="${yc + 3}" text-anchor="end">0</text>
+      <text class="fl-ax" x="${x0 - 6}" y="${Y(-dn) + 3}" text-anchor="end">−${dn}</text>
+      <text class="fl-ax" x="${x0 + 4}" y="${Y(up) + 3}">ВЕДЁТ ${hAbbr}</text>
+      <text class="fl-ax" x="${x0 + 4}" y="${Y(-dn) + 3}">ВЕДЁТ ${aAbbr}</text>
+      ${hasPens ? `<text class="fl-ax" x="${x0 - 6}" y="${lane.home + 3}" text-anchor="end">${hAbbr}</text>
+      <text class="fl-ax" x="${x0 - 6}" y="${lane.away + 3}" text-anchor="end">${aAbbr}</text>
+      <line x1="${x0}" x2="${x1}" y1="${lane.home}" y2="${lane.home}" class="fl-lane"/>
+      <line x1="${x0}" x2="${x1}" y1="${lane.away}" y2="${lane.away}" class="fl-lane"/>` : ""}
+      ${pens}${plabels}${dotEls}
+    </svg>
+    <div class="flow-cap" aria-live="polite">
+      <div class="tm num">${esc(cur.time)}</div>${emblem(sideTeam(g, cur.team))}
+      <div class="who">${esc(cur.author)}${strengthTag(cur, cur.i ?? g.goals.indexOf(cur), d)}<small>${cur.assists.length ? cur.assists.map(esc).join(", ") : "без передач"}</small></div>
+      <div class="sc num">${esc(cur.score)}</div>
+    </div>
+    <div class="legend"><span><i class="k-home"></i>ведут хозяева</span><span><i class="k-away"></i>ведут гости</span>
+      <span><i class="k-dot"></i>гол</span><span><i class="k-dot pp"></i>в большинстве</span>${hasPens ? `<span><i class="k-pen"></i>удаление</span>` : ""}</div>
+  </div>`;
+}
+
+function penaltyPeriod(p, g) {
+  const s = secs(p.time);
+  if (s >= 3600) return "ОТ";
+  return String(Math.min(3, Math.floor(s / 1200) + 1));
+}
+
+function goalsTab(g, d) {
+  const items = (g.goals || []).map((x, i) => ({ kind: "g", x, i, s: x.period === "РБ" ? 1e9 : secs(x.time), p: x.period }));
+  const pens = (d && d.penalties) || [];
+  if (recapView.pens) pens.forEach((x) => items.push({ kind: "p", x, s: secs(x.time) + 0.5, p: penaltyPeriod(x, g) }));
+  items.sort((a, b) => a.s - b.s);
+  let html = pens.length ? `<div class="chips" role="group" aria-label="Что показать">
+    <button data-recap-pens="0" class="${recapView.pens ? "" : "on"}" aria-pressed="${!recapView.pens}">Только голы</button>
+    <button data-recap-pens="1" class="${recapView.pens ? "on" : ""}" aria-pressed="${recapView.pens}">С удалениями</button></div>` : "";
+  if (!items.length) return html + `<div class="empty">В протоколе нет голов</div>`;
+  html += `<div class="goals">`;
+  let period = null;
+  for (const it of items) {
+    if (it.p !== period) {
+      period = it.p;
+      html += `<div class="period"><span class="tag">${esc(PERIOD_NAMES[period] || period)}</span></div>`;
+    }
+    const x = it.x;
+    if (it.kind === "g") {
+      html += `<div class="goal${it.i === recapView.pick ? " hl" : ""}">
+        <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
+        ${emblem(sideTeam(g, x.team))}
+        <div class="who">${esc(x.author)}${strengthTag(x, it.i, d)}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
+        <div class="sc">${esc(x.score)}</div>
+      </div>`;
+    } else {
+      html += `<div class="goal pen">
+        <div class="tm">${esc(x.time)}</div>
+        ${emblem(sideTeam(g, x.team))}
+        <div class="who">${esc(x.no ? `${x.no}. ${x.who}` : x.who)}<div class="as">${esc(x.why)}</div></div>
+        <div class="sc">${esc(x.min)} мин</div>
+      </div>`;
+    }
+  }
+  return html + `</div>`;
+}
+
+function hasStats(d) { return d && (d.shots || d.faceoffs || (d.goalies && d.goalies.length)); }
+
+function statsTab(g, d) {
+  // Больше — залито, как доля побед в очных встречах; у штрафа залит тот, у кого меньше
+  const row = (label, h, a, fewer) => {
+    const hw = fewer ? h < a : h > a, aw = fewer ? a < h : a > h;
+    return `<div class="cmp-row"><div class="cmp-top"><b class="num">${h}</b><span>${label}</span><b class="num">${a}</b></div>
+      <div class="cmp-bar" role="img" aria-label="${esc(`${label}: ${team(g.home).name} ${h}, ${team(g.away).name} ${a}`)}"><i class="${hw ? "w" : ""}" style="flex:${h || 0.01}"></i><i class="${aw ? "w" : ""}" style="flex:${a || 0.01}"></i></div></div>`;
+  };
+  let html = `<div class="cmp-head">${emblem(g.home)}<span>${esc(team(g.home).abbr)}</span><span></span><span>${esc(team(g.away).abbr)}</span>${emblem(g.away)}</div><div class="cmp">`;
+  if (d.shots) html += row("Броски в створ", d.shots.home, d.shots.away);
+  if (d.faceoffs) html += row("Вбрасывания", d.faceoffs.home, d.faceoffs.away);
+  if (d.pim) html += row("Штраф, мин", d.pim.home, d.pim.away, true);
+  if (d.pp) {
+    const pp = (s) => `${d.pp[s][0]} из ${d.pp[s][1]}`;
+    html += `<div class="cmp-row"><div class="cmp-top small"><b class="num">${pp("home")}</b><span>Голы в большинстве</span><b class="num">${pp("away")}</b></div></div>`;
+  }
+  html += `</div>`;
+  if (d.goalies && d.goalies.length) {
+    html += `<div class="label">Вратари<span class="aside">отражено</span></div><div class="gk">`;
+    for (const k of d.goalies) {
+      const pct = k.shots ? `${(Math.round((1000 * k.saves) / k.shots) / 10).toLocaleString("ru-RU")}%` : "—";
+      const toi = k.toi && k.toi !== "60:00" && k.toi !== "65:00" ? ` · ${esc(k.toi)} на льду` : "";
+      html += `<div class="gk-row">${emblem(sideTeam(g, k.team))}<div class="nm">${k.no ? `${esc(k.no)}. ` : ""}${esc(k.name)}<small>${k.saves} из ${k.shots} ${plural(k.shots, "броска", "бросков", "бросков")}${toi}</small></div><div class="pc num">${pct}</div></div>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+function rosterTab(g, d) {
+  const side = recapView.side;
+  const groups = [["G", "Вратари"], ["D", "Защитники"], ["F", "Нападающие"]];
+  let html = `<div class="chips" role="group" aria-label="Команда">
+    ${["home", "away"].map((s) => `<button data-recap-side="${s}" class="${side === s ? "on" : ""}" aria-pressed="${side === s}">${esc(team(sideTeam(g, s)).name)}</button>`).join("")}</div>`;
+  const r = d.lineups[side];
+  html += `<div class="roster">`;
+  for (const [key, title] of groups) {
+    if (!r[key] || !r[key].length) continue;
+    html += `<div class="grp">${title}</div>`;
+    for (const p of r[key]) {
+      const pts = p.dnp ? "запас" : key === "G" ? "" : `${p.g}+${p.a}`;
+      const scored = !p.dnp && p.g + p.a > 0;
+      html += `<div class="pl${scored ? " scored" : ""}"><span class="no num">${p.no != null ? esc(p.no) : ""}</span>
+        <span class="nm">${esc(p.name)}${p.cap ? `<span class="tag soft">${esc(p.cap)}</span>` : ""}</span>
+        <span class="pts num${scored ? "" : " z"}">${pts}</span></div>`;
+    }
+  }
+  return html + `</div><div class="note">«К» — капитан, «А» — ассистент. Очки — голы + передачи за этот матч.</div>`;
+}
+
+function recapHTML(g) {
+  const d = recaps[g.id];
+  let html = "";
+  if (d && d.story) {
+    html += `<div class="story"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.6 6.2 6.7.5-5.1 4.4 1.6 6.5L12 16.6l-5.8 3.5 1.6-6.5L2.7 9.2l6.7-.5z"/></svg><p>${esc(d.story)}</p></div>`;
+  }
+  html += flowChart(g, d);
+  const tabs = [["goals", "Голы"]];
+  if (hasStats(d)) tabs.push(["stats", "Статистика"]);
+  if (d && d.lineups) tabs.push(["roster", "Составы"]);
+  if (!tabs.some((t) => t[0] === recapView.tab)) recapView.tab = "goals";
+  if (tabs.length > 1) {
+    html += `<div class="seg recap-seg" role="tablist">${tabs.map(([k, l]) =>
+      `<button role="tab" data-recap-tab="${k}" class="${recapView.tab === k ? "on" : ""}" aria-selected="${recapView.tab === k}">${l}</button>`).join("")}</div>`;
+  } else if (g.goals && g.goals.length) {
+    html += `<div class="label">Голы<span class="aside">${g.goals.length}</span></div>`;
+  }
+  const body = { goals: goalsTab, stats: statsTab, roster: rosterTab }[recapView.tab](g, d);
+  return html + `<div class="recap-body">${body}</div>`;
+}
+
+function factsHTML(g) {
+  const d = recaps[g.id];
+  let html = `<div class="label">О матче</div><div class="facts-card"><dl class="facts">`;
+  if (g.n) html += `<dt>Номер</dt><dd>№ ${esc(g.n)}</dd>`;
+  html += `<dt>Город</dt><dd>${esc(team(g.home).city)}</dd>`;
+  if (g.time) html += `<dt>Начало</dt><dd>${esc(g.time)} местное</dd>`;
+  if (g.attendance) html += `<dt>Зрители</dt><dd>${esc(Number(g.attendance).toLocaleString("ru-RU"))}</dd>`;
+  if (d && d.referees && d.referees.length) html += `<dt>Главные судьи</dt><dd>${d.referees.map(esc).join(", ")}</dd>`;
+  if (d && d.linesmen && d.linesmen.length) html += `<dt>Линейные судьи</dt><dd>${d.linesmen.map(esc).join(", ")}</dd>`;
+  if (d && d.coaches) {
+    for (const s of ["home", "away"]) if (d.coaches[s]) html += `<dt>Тренер ${esc(team(sideTeam(g, s)).name)}</dt><dd>${esc(d.coaches[s])}</dd>`;
+  }
+  html += `<dt>Календарь</dt><dd>${g.official ? "ФХР, официальный" : '<span class="tag soft">предварительно</span>'}</dd>`;
+  if (g.score) html += `<dt>Источник счёта</dt><dd>протокол лиги</dd>`;
+  return html + `</dl></div>`;
+}
+
+function rerenderRecap() {
+  const g = games().find((x) => x.id === recapView.id);
+  const box = $("#recap");
+  if (!g || !box || $("#sheet").hidden) return;
+  box.innerHTML = recapHTML(g);
+  $("#facts").innerHTML = factsHTML(g);
+}
+
 function openMatch(id) {
   const g = games().find((x) => x.id === id);
   if (!g) return;
+  if (recapView.id !== id) {
+    const gw = recaps[id] ? recaps[id].gw : null;
+    Object.assign(recapView, { id, tab: "goals", pens: false, side: g.home === state.fav || g.away !== state.fav ? "home" : "away",
+      pick: gw != null ? gw : g.goals && g.goals.length ? g.goals.length - 1 : null });
+  }
   let html = `<div class="grab"></div>
     <div class="sheet-head"><span class="when">${esc(fmtLong(g.date))} ${parseISO(g.date).getUTCFullYear()} · ${esc(until(g.date))}</span>
     <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
     <div class="board-card">${board(g)}${periodsLine(g)}</div>`;
 
-  if (g.goals && g.goals.length) {
-    html += `<div class="label">Голы<span class="aside">${g.goals.length}</span></div><div class="goals">`;
-    let period = null;
-    for (const x of g.goals) {
-      if (x.period !== period) {
-        period = x.period;
-        html += `<div class="period"><span class="tag">${esc(PERIOD_NAMES[period] || period)}</span></div>`;
-      }
-      const tag = x.strength && x.strength !== "рав." ? `<span class="tag">${esc(x.strength.replace(".", ""))}</span>` : "";
-      html += `<div class="goal">
-        <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
-        ${emblem(x.team === "away" ? g.away : g.home)}
-        <div class="who">${esc(x.author)}${tag}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
-        <div class="sc">${esc(x.score)}</div>
-      </div>`;
-    }
-    html += `</div>`;
-  }
-
+  if (g.score) html += `<div id="recap">${recapHTML(g)}</div>`;
   html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : ""}</div>`;
-
-  html += `<div class="label">О матче</div><div class="facts-card"><dl class="facts">`;
-  if (g.n) html += `<dt>Номер</dt><dd>№ ${esc(g.n)}</dd>`;
-  html += `<dt>Город</dt><dd>${esc(team(g.home).city)}</dd>`;
-  if (g.time) html += `<dt>Начало</dt><dd>${esc(g.time)} местное</dd>`;
-  if (g.attendance) html += `<dt>Зрители</dt><dd>${esc(Number(g.attendance).toLocaleString("ru-RU"))}</dd>`;
-  html += `<dt>Календарь</dt><dd>${g.official ? "ФХР, официальный" : '<span class="tag soft">предварительно</span>'}</dd>`;
-  if (g.score) html += `<dt>Источник счёта</dt><dd>протокол лиги</dd>`;
-  html += `</dl></div>`;
+  html += `<div id="facts">${factsHTML(g)}</div>`;
 
   showSheet(html);
+  if (g.score && !recaps[id]) {
+    loadRecap(id).then((d) => {
+      if (!d || recapView.id !== id) return;
+      if (d.gw != null) recapView.pick = d.gw;
+      rerenderRecap();
+    });
+  }
   if (!state.h2h) {
     loadH2H().then(() => {
       const box = $("#h2h");
@@ -751,7 +987,7 @@ function confirmTeam(id = state.draft || state.fav) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -769,6 +1005,20 @@ document.addEventListener("click", (e) => {
     return render();
   }
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
+  if (el.dataset.recapTab || el.dataset.recapGoal || el.dataset.recapPens || el.dataset.recapSide) {
+    if (el.dataset.recapTab) recapView.tab = el.dataset.recapTab;
+    if (el.dataset.recapGoal) recapView.pick = Number(el.dataset.recapGoal);
+    if (el.dataset.recapPens) recapView.pens = el.dataset.recapPens === "1";
+    if (el.dataset.recapSide) recapView.side = el.dataset.recapSide;
+    // после перерисовки вернуть фокус на ту же кнопку: иначе с клавиатуры он улетает в начало
+    const attr = ["recapTab", "recapGoal", "recapPens", "recapSide"].find((k) => el.dataset[k]);
+    const sel = `[data-${attr.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}="${el.dataset[attr]}"]`;
+    haptic();
+    rerenderRecap();
+    const f = $(`#recap ${sel}`);
+    if (f) f.focus({ preventScroll: true });
+    return;
+  }
   if (el.hasAttribute("data-confirm")) return confirmTeam();
   if (el.dataset.tab) return go(el.dataset.tab);
   if (el.dataset.game) return openMatch(el.dataset.game);
@@ -813,7 +1063,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") return closeMatch();
   if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) {
     e.preventDefault();
-    e.target.click();
+    e.target.dispatchEvent(new MouseEvent("click", { bubbles: true }));   // у SVG нет .click()
   }
 });
 
@@ -823,6 +1073,14 @@ function startParam() {
   const fromTg = inTelegram && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
   const q = new URLSearchParams(location.search);
   return fromTg || q.get("tgWebAppStartParam") || q.get("startapp") || q.get("team");
+}
+
+// Ссылка на матч из бота: ?match=<id> или startapp=m-<id> (ADR-008)
+function matchParam() {
+  const fromTg = inTelegram && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+  const q = new URLSearchParams(location.search);
+  const sp = fromTg || q.get("tgWebAppStartParam") || q.get("startapp") || "";
+  return q.get("match") || (/^m-/.test(sp) ? sp.slice(2) : null);
 }
 
 function pickFav(id) {
@@ -903,6 +1161,11 @@ function boot(d) {
   }
   render();
   hideSplash();
+  const mid = matchParam();
+  if (mid && !state.openedFromLink && games().some((g) => g.id === mid)) {
+    state.openedFromLink = true;
+    openMatch(mid);
+  }
 }
 
 async function main() {

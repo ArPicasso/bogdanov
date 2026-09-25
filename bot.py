@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -25,12 +26,16 @@ from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton, Inl
 BASE = Path(__file__).parent
 TZ = ZoneInfo("Europe/Moscow")
 SUBS_FILE = BASE / "subscribers.json"
+ANNOUNCED_FILE = BASE / "announced.json"   # матчи, о которых уже написали после игры (ADR-008)
 STICKERS = BASE / "stickers"          # стикеры бота (ADR-005), 512×512 WEBP
 # мини-апп (ADR-003); переменная окружения — только чтобы подставить тестовый адрес
 WEBAPP_URL = os.environ.get("WEBAPP_URL") or "https://arpicasso.github.io/bogdanov/"
 REMIND_TODAY_AT = time(10, 0)      # утром в день игры
 REMIND_TOMORROW_AT = time(19, 0)   # вечером накануне
 REMIND_TEAM = "Рязань-ВДВ"         # напоминания пока только о её матчах: games.json
+RESULTS_POLL = 600                 # раз в 10 минут смотрим опубликованные результаты мини-аппа
+RESULTS_FRESH_DAYS = 2             # матчи старше не присылаем
+QUIET_FROM, QUIET_TO = time(23, 0), time(9, 0)   # ночью молчим, результат уйдёт утром
 
 DOW = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
@@ -50,6 +55,7 @@ GAMES = sorted(
 )
 # id команды → название: для диплинка /start <id> (ADR-005)
 TEAMS = {t["id"]: t["name"] for t in json.loads((BASE / "teams.json").read_text(encoding="utf-8"))}
+REMIND_TEAM_ID = next(i for i, name in TEAMS.items() if name == REMIND_TEAM)
 
 # ---------- свои эмодзи ----------
 # Набор rhl_u21_by_<бот> (tools/upload_emoji.py) в порядке stickers/emoji.json. Писать ими бот
@@ -84,6 +90,7 @@ def emoji_off(err: Exception) -> bool:
 # ---------- тексты и кнопки ----------
 
 B_APP = "Открыть РХЛ"
+B_RECAP = "Как это было"
 
 # видно в пустом чате до «Старт» и в профиле бота (до 512 и 120 символов)
 DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.\n\n"
@@ -93,12 +100,14 @@ DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.
 SHORT_DESCRIPTION = "РХЛ U21: календарь, таблица и счёт матчей. Напомню перед игрой 🏒"
 
 
-def app_url(team: str | None = None) -> str:
-    """Адрес мини-аппа; с командой — ?team=<id>, мини-апп выберет её, если своей ещё нет."""
-    if not team:
+def app_url(team: str | None = None, match: str | None = None) -> str:
+    """Адрес мини-аппа; с командой — ?team=<id>, мини-апп выберет её, если своей ещё нет.
+    С матчем — ?match=<id>, мини-апп сразу откроет его карточку (ADR-008)."""
+    extra = [(k, v) for k, v in (("team", team), ("match", match)) if v]
+    if not extra:
         return WEBAPP_URL
     u = urlsplit(WEBAPP_URL)
-    return urlunsplit(u._replace(query=urlencode(parse_qsl(u.query) + [("team", team)])))
+    return urlunsplit(u._replace(query=urlencode(parse_qsl(u.query) + extra)))
 
 
 def app_kb(team: str | None = None) -> InlineKeyboardMarkup:
@@ -108,6 +117,16 @@ def app_kb(team: str | None = None) -> InlineKeyboardMarkup:
         btn = InlineKeyboardButton(text=B_APP, icon_custom_emoji_id=CUSTOM["puck"], web_app=web_app)
     else:
         btn = InlineKeyboardButton(text=f"{EMOJI['puck']} {B_APP}", web_app=web_app)
+    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
+
+
+def recap_kb(match: str) -> InlineKeyboardMarkup:
+    """Одна кнопка — карточка сыгранного матча в мини-аппе."""
+    web_app = WebAppInfo(url=app_url(match=match))
+    if "goal" in CUSTOM:
+        btn = InlineKeyboardButton(text=B_RECAP, icon_custom_emoji_id=CUSTOM["goal"], web_app=web_app)
+    else:
+        btn = InlineKeyboardButton(text=f"{EMOJI['goal']} {B_RECAP}", web_app=web_app)
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 
@@ -158,6 +177,19 @@ def reminder_text(g: Game, kind: str) -> str:
     where = f"{e('home')} Дома" if g.home else f"{e('away')} На выезде"
     return (f"{e('bell')} <b>{head}</b>\n\n{DOW[g.d.weekday()]} {g.d:%d.%m} · {REMIND_TEAM} — "
             f"<b>{html.escape(g.opponent)}</b>\n{where}")
+
+def result_text(g: dict, names: dict[str, str], story: str = "") -> str:
+    """Сообщение после матча: счёт, исход для нашей команды, фраза-сюжет из разбора (ADR-008)."""
+    sc = g["score"]
+    mine, theirs = ((sc["home"], sc["away"]) if g["home"] == REMIND_TEAM_ID else (sc["away"], sc["home"]))
+    how = {"ОТ": " в овертайме", "Б": " по буллитам"}.get(sc["decision"], "")
+    head = f"{e('win')} Победа{how}!" if mine > theirs else f"{e('loss')} Поражение{how}"
+    dec = f" ({sc['decision']})" if sc["decision"] else ""
+    home, away = (html.escape(names.get(g[k], g[k])) for k in ("home", "away"))
+    text = f"<b>{head}</b>\n\n{home} <b>{sc['home']}:{sc['away']}</b>{dec} {away}"
+    if story:
+        text += f"\n\n{html.escape(story)}"
+    return text + "\n\nГолы, ход матча и составы — по кнопке 👇"
 
 # ---------- стикеры ----------
 
@@ -268,6 +300,83 @@ async def reminder_loop(bot: Bot):
             await asyncio.sleep(0.05)
 
 
+# ---------- результаты после матча (ADR-008) ----------
+
+def load_announced() -> set[str] | None:
+    """None — файла ещё нет: первый запуск."""
+    try:
+        return set(json.loads(ANNOUNCED_FILE.read_text()))
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        return set()
+
+
+def save_announced(ids: set[str]) -> None:
+    ANNOUNCED_FILE.write_text(json.dumps(sorted(ids)))
+
+
+def played_games(data: dict, team: str = REMIND_TEAM_ID) -> list[dict]:
+    return [g for g in data.get("games", []) if g.get("score") and team in (g["home"], g["away"])]
+
+
+def fresh_results(data: dict, announced: set[str], today: date) -> list[dict]:
+    """Сыгранные матчи нашей команды, о которых ещё не писали, не старше двух дней."""
+    since = today - timedelta(days=RESULTS_FRESH_DAYS)
+    return sorted((g for g in played_games(data) if g["id"] not in announced
+                   and date.fromisoformat(g["date"]) >= since), key=lambda g: g["date"])
+
+
+def quiet(now: datetime) -> bool:
+    t = now.astimezone(TZ).time()
+    return t >= QUIET_FROM or t < QUIET_TO
+
+
+def data_url(name: str) -> str:
+    """Файл данных рядом с мини-аппом: .../data/<name>, без параметров адреса."""
+    u = urlsplit(WEBAPP_URL)
+    path = u.path if u.path.endswith("/") else u.path.rsplit("/", 1)[0] + "/"
+    return urlunsplit(u._replace(path=path + "data/" + name, query="", fragment=""))
+
+
+async def fetch_json(session: aiohttp.ClientSession, name: str) -> dict | None:
+    try:
+        async with session.get(data_url(name)) as r:
+            if r.status != 200:
+                return None
+            return await r.json(content_type=None)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        logging.warning("data %s not loaded", name)
+        return None
+
+
+async def results_loop(bot: Bot):
+    """Бот сам не качает протоколы: их собирает GitHub Actions и публикует вместе с мини-аппом."""
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+        while True:
+            data = await fetch_json(session, "league.json")
+            announced = load_announced()
+            if data and announced is None:   # первый запуск: сыгранное раньше не присылаем
+                save_announced({g["id"] for g in played_games(data)})
+            elif data and not quiet(datetime.now(TZ)):
+                names = {t["id"]: t["name"] for t in data.get("teams", [])}
+                for g in fresh_results(data, announced, datetime.now(TZ).date()):
+                    recap = await fetch_json(session, f"matches/{g['id']}.json") or {}
+                    for cid in list(SUBS):
+                        try:
+                            await say(bot, cid, lambda: (result_text(g, names, recap.get("story", "")), recap_kb(g["id"])))
+                        except TelegramForbiddenError:
+                            SUBS.discard(cid)
+                            save_subs(SUBS)
+                        except Exception:
+                            logging.exception("result to %s failed", cid)
+                        await asyncio.sleep(0.05)
+                    announced.add(g["id"])
+                    save_announced(announced)
+            await asyncio.sleep(RESULTS_POLL)
+
+
 async def load_custom_emoji(bot: Bot) -> None:
     try:
         me = await bot.get_me()
@@ -291,6 +400,7 @@ async def main():
         logging.exception("set description failed")
     await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="РХЛ", web_app=WebAppInfo(url=WEBAPP_URL)))
     asyncio.create_task(reminder_loop(bot))
+    asyncio.create_task(results_loop(bot))
     await dp.start_polling(bot)
 
 

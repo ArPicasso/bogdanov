@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
@@ -101,6 +101,7 @@ def parse_html(html: str) -> Node:
 class Player:
     number: int | None
     name: str
+    id: int | None = field(default=None, compare=False)   # id на сайте лиги: /players/<id>/
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,33 @@ class Goal:
     strength: str      # "рав.", "бол.", "мен.", "бул." или ""
     author: Player
     assists: tuple[Player, ...]
+
+
+@dataclass(frozen=True)
+class Penalty:
+    time: str               # игровое время "35:29"
+    team: str               # "home" или "away"
+    player: Player | None   # None — командный штраф
+    minutes: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class Skater:
+    """Строка статистики игрока в протоколе матча (ADR-008). Вратарь — role "G"."""
+    team: str          # "home" или "away"
+    role: str          # "G" вратарь, "D" защитник, "F" нападающий
+    player: Player
+    captain: str = ""  # "К", "А" или ""
+    played: bool = True
+    goals: int = 0
+    assists: int = 0
+    pim: int = 0
+    faceoffs: int = 0
+    faceoffs_won: int = 0
+    shots_against: int = 0   # у вратарей
+    saves: int = 0
+    toi: str = ""            # время на льду, у вратарей
 
 
 @dataclass(frozen=True)
@@ -128,6 +156,11 @@ class Protocol:
     decision: str      # "", "ОТ" или "Б"
     periods: tuple[tuple[int, int], ...]
     goals: tuple[Goal, ...]
+    penalties: tuple[Penalty, ...] = ()
+    lineups: tuple[Skater, ...] = ()
+    referees: tuple[str, ...] = ()
+    linesmen: tuple[str, ...] = ()
+    coaches: tuple[str, str] = ("", "")   # хозяев и гостей
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -140,31 +173,134 @@ TITLE_RE = re.compile(r"Матч № (\d+)\.\s*(\d{1,2}) (\S+) (\d{4}),[^,]*,\s*
 SCORE_RE = re.compile(r"(\d+)\s*:\s*(\d+)\s*(ОТ|Б)?")
 PAIR_RE = re.compile(r"(\d+):(\d+)")
 PLAYER_RE = re.compile(r"^(?:(\d+)\.\s*)?(.+?)(?:\s*\(\d+\))?$")
+PLAYER_HREF = re.compile(r"/players/(\d+)/")
+CAPTAIN_RE = re.compile(r"\((К|А)\)\s*$")
+ROLES = {"Вратари": "G", "Защитники": "D", "Нападающие": "F"}
 
 
-def _player(cell: str) -> Player | None:
+def _player(cell: str, href: str = "") -> Player | None:
     m = PLAYER_RE.match(cell)
     if not cell or not m:
         return None
-    return Player(int(m.group(1)) if m.group(1) else None, m.group(2).strip())
+    pid = PLAYER_HREF.search(href or "")
+    return Player(int(m.group(1)) if m.group(1) else None, m.group(2).strip(), int(pid.group(1)) if pid else None)
+
+
+def _cell_player(td: Node) -> Player | None:
+    a = td.find("a")
+    return _player(td.text(), a.attrs.get("href", "") if a else "")
+
+
+def _cells(tr: Node) -> list[Node]:
+    return [td for td in tr.children if isinstance(td, Node) and td.tag == "td"]
 
 
 def _goals(table: Node) -> tuple[Goal, ...]:
     goals, prev = [], (0, 0)
     for tr in table.find_all("tr"):
-        cells = [td.text() for td in tr.children if isinstance(td, Node) and td.tag == "td"]
+        tds = _cells(tr)
+        cells = [td.text() for td in tds]
         if len(cells) < 8:
             continue
         m = PAIR_RE.fullmatch(cells[3])
-        author = _player(cells[5])
+        author = _cell_player(tds[5])
         if not m or not author:
             continue
         score = (int(m.group(1)), int(m.group(2)))
         team = "home" if score[0] > prev[0] else "away"
         prev = score
-        assists = tuple(p for p in map(_player, cells[6:8]) if p)
+        assists = tuple(p for p in map(_cell_player, tds[6:8]) if p)
         goals.append(Goal(cells[1], cells[2], cells[3], team, cells[4], author, assists))
     return tuple(goals)
+
+
+def _penalties(table: Node) -> tuple[Penalty, ...]:
+    """Две колонки: слева хозяева, справа гости. Строки «Всего за период» пропускаем."""
+    out = []
+    for tr in table.find_all("tr"):
+        if "report" in tr.classes():
+            continue
+        tds = _cells(tr)
+        if len(tds) < 9:
+            continue
+        for team, (t, who, mins, why) in (("home", tds[0:4]), ("away", tds[5:9])):
+            time = t.text()
+            if not re.fullmatch(r"\d{1,3}:\d{2}", time) or not mins.text().isdigit():
+                continue
+            out.append(Penalty(time, team, _cell_player(who), int(mins.text()), why.text()))
+    return tuple(sorted(out, key=lambda p: _seconds(p.time)))
+
+
+def _seconds(t: str) -> int:
+    m, s = t.split(":")
+    return int(m) * 60 + int(s)
+
+
+def _int(v: str) -> int:
+    return int(v) if re.fullmatch(r"-?\d+", v) else 0
+
+
+def _lineups(block: Node) -> tuple[Skater, ...]:
+    """Блок «Статистика игроков»: h2 с командой, h3 с амплуа, таблица. Идём по порядку."""
+    out, team, role, teams_seen = [], None, None, 0
+    for n in block.iter():
+        if n.tag == "h2" and "Статистика игроков" in n.text():
+            team = "home" if teams_seen == 0 else "away"
+            teams_seen += 1
+        elif n.tag == "h3":
+            role = ROLES.get(n.text())
+        elif n.tag == "table" and "universal_table" in n.classes() and team and role:
+            rows = n.find_all("tr")
+            if not rows:
+                continue
+            head = [th.text() for th in rows[0].find_all("th")][1:]   # первая — номер и имя
+            for tr in rows[1:]:
+                tds = _cells(tr)
+                if len(tds) < 2 + len(head):
+                    continue
+                name_td = tds[1]
+                a = name_td.find("a")
+                cap = CAPTAIN_RE.search(name_td.text())
+                name = a.text() if a else CAPTAIN_RE.sub("", name_td.text()).strip()
+                pid = PLAYER_HREF.search(a.attrs.get("href", "")) if a else None
+                number = tds[0].text()
+                player = Player(int(number) if number.isdigit() else None, name, int(pid.group(1)) if pid else None)
+                v = {k: tds[2 + i].text() for i, k in enumerate(head)}
+                if role == "G":
+                    out.append(Skater(team, role, player, cap.group(1) if cap else "",
+                                      played=_int(v.get("И", "")) > 0, assists=_int(v.get("А", "")),
+                                      pim=_int(v.get("Штр", "")), shots_against=_int(v.get("БВ", "")),
+                                      saves=_int(v.get("ОБ", "")), toi=v.get("ВП", "").replace("-", "")))
+                else:
+                    out.append(Skater(team, role, player, cap.group(1) if cap else "",
+                                      played=_int(v.get("И", "")) > 0, goals=_int(v.get("Ш", "")),
+                                      assists=_int(v.get("А", "")), pim=_int(v.get("Штр", "")),
+                                      faceoffs=_int(v.get("Вбр", "")), faceoffs_won=_int(v.get("ВВбр", ""))))
+    return tuple(out)
+
+
+def _people(root: Node, label: str) -> tuple[str, ...]:
+    """Судьи: абзац «<strong>Главные судьи:</strong> 10. Иванов Савелий <br> 30. Беляев Михаил»."""
+    for p in root.find_all("p"):
+        strong = p.find("strong")
+        if strong and strong.text().startswith(label):
+            names = []
+            for ch in p.children:
+                if isinstance(ch, str) and ch.strip():
+                    names.append(re.sub(r"^\d+\.\s*", "", ch.strip()))
+            return tuple(n for n in names if n)
+    return ()
+
+
+def _coaches(root: Node) -> tuple[str, str]:
+    row = root.find("tr", "second_row")
+    if not row:
+        return ("", "")
+    found = []
+    for cls in ("first_column", "right_column"):
+        td = row.find("td", cls)
+        found.append(re.sub(r"^Тренер:\s*", "", td.text()) if td else "")
+    return (found[0], found[1])
 
 
 def parse_protocol(html: str, game_id: int) -> Protocol | None:
@@ -185,6 +321,8 @@ def parse_protocol(html: str, game_id: int) -> Protocol | None:
     detail = root.find("div", "detail_count")
     periods = tuple((int(a), int(b)) for a, b in PAIR_RE.findall(detail.text())) if detail else ()
     goals_table = root.find("table", "matches_goals")
+    pen_table = root.find("table", "matches_penalty")
+    stats = root.find("div", "matches_player_statistic")
 
     return Protocol(
         game_id=game_id,
@@ -199,6 +337,11 @@ def parse_protocol(html: str, game_id: int) -> Protocol | None:
         decision=s.group(3) or "",
         periods=periods,
         goals=_goals(goals_table) if goals_table else (),
+        penalties=_penalties(pen_table) if pen_table else (),
+        lineups=_lineups(stats) if stats else (),
+        referees=_people(root, "Главные судьи"),
+        linesmen=_people(root, "Линейные судьи"),
+        coaches=_coaches(root),
     )
 
 

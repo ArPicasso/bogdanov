@@ -18,7 +18,9 @@ TEAMS_FILE = BASE / "teams.json"
 OFFICIAL_GAMES = BASE / "games.json"
 OFFICIAL_TEAM = "ryazan-vdv"          # у кого из команд есть официальный календарь — games.json
 HISTORY_FILE = BASE / "history.json"
+HIDDEN_FILE = BASE / "hidden_players.json"
 OUT = BASE / "webapp" / "data" / "league.json"
+HIDDEN_NAME = "Игрок скрыт"
 H2H_LAST = 5
 
 
@@ -77,8 +79,26 @@ def merge_calendar(teams: Teams, raw: list[rhockey.RawGame], official: list[dict
 # ---------- результаты ----------
 
 
-def attach_results(games: list[dict], teams: Teams, results: league.Results) -> list[str]:
-    """Протоколы лиги ложатся на матчи по дате и командам. Возвращает непривязанные."""
+def load_hidden(path: Path = HIDDEN_FILE) -> set[int]:
+    """Id игроков на сайте лиги, которых не показываем по просьбе (ADR-007, ADR-008)."""
+    try:
+        return {int(x["id"]) for x in json.loads(path.read_text(encoding="utf-8"))}
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        return set()
+
+
+def shown(player: dict | None, hidden: set[int] = frozenset()) -> str:
+    """Имя игрока для мини-аппа: скрытых по просьбе заменяем."""
+    if not player:
+        return ""
+    return HIDDEN_NAME if player.get("id") in hidden else player["name"]
+
+
+def attach_results(games: list[dict], teams: Teams, results: league.Results,
+                   protocols: dict[str, dict] | None = None, hidden: set[int] = frozenset()) -> list[str]:
+    """Протоколы лиги ложатся на матчи по дате и командам. Возвращает непривязанные.
+
+    protocols, если передан, собирает протокол каждого привязанного матча по id матча."""
     index = {(g["date"], g["home"], g["away"]): g for g in games}
     unmatched = []
     for tournament in results.values():
@@ -94,9 +114,181 @@ def attach_results(games: list[dict], teams: Teams, results: league.Results) -> 
             g["score"] = {"home": p["home_score"], "away": p["away_score"], "decision": p["decision"],
                           "periods": p["periods"]}
             g["goals"] = [{"period": x["period"], "time": x["time"], "team": x["team"], "score": x["score"],
-                           "strength": x["strength"], "author": x["author"]["name"],
-                           "assists": [a["name"] for a in x["assists"]]} for x in p["goals"]]
+                           "strength": x["strength"], "author": shown(x["author"], hidden),
+                           "assists": [shown(a, hidden) for a in x["assists"]]} for x in p["goals"]]
+            if protocols is not None:
+                protocols[g["id"]] = p
     return unmatched
+
+# ---------- разбор матча (ADR-008) ----------
+
+
+def secs(t: str) -> int:
+    m, s = t.split(":")
+    return int(m) * 60 + int(s)
+
+
+NUM = {3: "три", 4: "четыре", 5: "пять", 6: "шесть", 7: "семь", 8: "восемь", 9: "девять", 10: "десять"}
+PERIOD_GEN = {"1": "первого", "2": "второго", "3": "третьего"}
+PP_MINUTES = {2, 4, 5}   # после этих удалений соперник играет в большинстве
+
+
+def winning_goal(g: dict) -> int | None:
+    """Номер победной шайбы в списке голов: гол победителя, после которого соперник уже не догнал."""
+    s = g.get("score")
+    if not s or s["home"] == s["away"]:
+        return None
+    win = "home" if s["home"] > s["away"] else "away"
+    need = min(s["home"], s["away"]) + 1
+    count = 0
+    for i, x in enumerate(g.get("goals", [])):
+        if x["team"] == win:
+            count += 1
+            if count == need:
+                return i
+    return None
+
+
+def _burst(goals: list[dict]) -> tuple[int, int] | None:
+    """Самая длинная серия шайб одной команды без ответа внутри одного периода (от трёх)."""
+    best = None
+    i = 0
+    while i < len(goals):
+        j = i
+        while (j + 1 < len(goals) and goals[j + 1]["team"] == goals[i]["team"]
+               and goals[j + 1]["period"] == goals[i]["period"]):
+            j += 1
+        if j - i + 1 >= 3 and (best is None or j - i > best[1] - best[0]):
+            best = (i, j)
+        i = j + 1
+    return best
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def story(g: dict, teams: dict[str, str], goalies: list[dict] = ()) -> str:
+    """Сюжет матча одной-двумя фразами. Только факты протокола, без оценок. Нечего сказать — пусто."""
+    s = g.get("score")
+    goals = [x for x in g.get("goals", []) if x["period"] != "РБ"]
+    if not s or s["home"] == s["away"]:
+        return ""
+    win = "home" if s["home"] > s["away"] else "away"
+    lose = "away" if win == "home" else "home"
+    name = {side: f"«{teams.get(g[side], g[side])}»" for side in ("home", "away")}
+    out = []
+
+    # камбэк: победитель проигрывал в две шайбы и больше
+    worst, worst_score, diff = 0, None, 0
+    for x in goals:
+        diff += 1 if x["team"] == win else -1
+        if diff < worst:
+            worst, worst_score = diff, x["score"]
+    if worst <= -2:
+        h, a = worst_score.split(":")
+        mine, theirs = (h, a) if win == "home" else (a, h)
+        end = "но отыгрались" if s["decision"] else "и вырвали победу"
+        out.append(f"Камбэк {name[win]}: уступали {mine}:{theirs}, {end}.")
+
+    if s["decision"] == "Б":
+        so = [x for x in g.get("goals", []) if x["period"] == "РБ"]
+        who = so[-1]["author"] if so and so[-1]["author"] != HIDDEN_NAME else ""
+        out.append(f"Всё решили буллиты, победный забил {who}." if who else "Всё решили буллиты.")
+    elif s["decision"] == "ОТ" and goals and goals[-1]["period"] == "ОТ":
+        who = goals[-1]["author"]
+        out.append(f"В овертайме победу принёс {who}." if who != HIDDEN_NAME else "Победу принёс овертайм.")
+
+    burst = _burst(goals)
+    if burst and len(out) < 2:
+        i, j = burst
+        team, n = goals[i]["team"], j - i + 1
+        mins = max(1, -(-(secs(goals[j]["time"]) - secs(goals[i]["time"])) // 60))
+        period = PERIOD_GEN.get(goals[i]["period"])
+        word = NUM.get(n, str(n))
+        text = f"{word} {plural(n, 'шайба', 'шайбы', 'шайб')} подряд у {name[team]}"
+        if period and j > i:
+            text += f" за {mins} {plural(mins, 'минуту', 'минуты', 'минут')} {period} периода"
+        if team == win and goals[0]["team"] == lose and i > 0 and worst > -2:
+            side = "хозяева" if lose == "home" else "гости"
+            out.append(f"Первыми забили {side}, а дальше {text}.")
+        else:
+            out.append(text[0].upper() + text[1:] + ".")
+
+    if len(out) < 2 and s[lose] == 0:
+        keeper = [k for k in goalies if k["team"] == win and k["shots"]]
+        if len(keeper) == 1 and keeper[0]["name"] != HIDDEN_NAME:
+            k = keeper[0]
+            out.append(f"Сухой матч: {k['name']} отразил все {k['shots']} "
+                       f"{plural(k['shots'], 'бросок', 'броска', 'бросков')}.")
+
+    gw = winning_goal(g)
+    if len(out) < 2 and not s["decision"] and gw is not None:
+        x = g["goals"][gw]
+        left = 60 * 60 - secs(x["time"])
+        if 0 < left <= 180 and x["author"] != HIDDEN_NAME:
+            out.append(f"Победная шайба за {left // 60}:{left % 60:02d} до сирены: {x['author']}.")
+    return " ".join(out[:2])
+
+
+def power_play(p: dict) -> dict[str, list[int]]:
+    """Голы в большинстве и число удалений соперника, дающих большинство. Взаимные не считаем."""
+    pens = [x for x in p.get("penalties", []) if x["minutes"] in PP_MINUTES]
+    chances = {"home": 0, "away": 0}
+    for x in pens:
+        mutual = any(y is not x and y["team"] != x["team"] and y["time"] == x["time"]
+                     and y["minutes"] == x["minutes"] for y in pens)
+        if not mutual:
+            chances["away" if x["team"] == "home" else "home"] += 1
+    goals = {side: sum(1 for x in p["goals"] if x["team"] == side and x["strength"].startswith("бол"))
+             for side in ("home", "away")}
+    return {side: [goals[side], chances[side]] for side in ("home", "away")}
+
+
+def match_detail(g: dict, p: dict, teams: dict[str, str], hidden: set[int] = frozenset()) -> dict:
+    """webapp/data/matches/<id>.json — всё о сыгранном матче, чего нет в league.json (ADR-008)."""
+    other = {"home": "away", "away": "home"}
+    lineups = p.get("lineups", [])
+    goalies = [{"team": k["team"], "no": k["player"]["number"], "name": shown(k["player"], hidden),
+                "shots": k["shots_against"], "saves": k["saves"], "toi": k["toi"]}
+               for k in lineups if k["role"] == "G" and k["played"] and (k["shots_against"] or k["toi"])]
+    shots = {side: sum(k["shots"] for k in goalies if k["team"] == other[side]) for side in ("home", "away")}
+    fo = {side: sum(k["faceoffs_won"] for k in lineups if k["team"] == side) for side in ("home", "away")}
+    pim = {side: sum(x["minutes"] for x in p.get("penalties", []) if x["team"] == side) for side in ("home", "away")}
+    rosters: dict[str, dict[str, list]] = {"home": {"G": [], "D": [], "F": []}, "away": {"G": [], "D": [], "F": []}}
+    for k in lineups:
+        if k["player"].get("id") in hidden:
+            continue
+        row = {"no": k["player"]["number"], "name": k["player"]["name"], "cap": k["captain"],
+               "g": k["goals"], "a": k["assists"]}
+        if not k["played"]:
+            row["dnp"] = True
+        rosters[k["team"]][k["role"]].append(row)
+    length = 65 if p.get("decision") else 60
+    last = max((secs(x["time"]) for x in p["goals"] if x["period"] != "РБ"), default=0)
+    return {
+        "id": g["id"],
+        "story": story(g, teams, goalies),
+        "gw": winning_goal(g),
+        "length": max(length, -(-last // 60)),
+        "penalties": [{"time": x["time"], "team": x["team"],
+                       "no": x["player"]["number"] if x["player"] and x["player"].get("id") not in hidden else None,
+                       "who": shown(x["player"], hidden) or "Командный штраф",
+                       "min": x["minutes"], "why": x["reason"]} for x in p.get("penalties", [])],
+        "shots": shots if any(shots.values()) else None,
+        "faceoffs": fo if any(fo.values()) else None,
+        "pim": pim,
+        "pp": power_play(p),
+        "goalies": goalies,
+        "lineups": rosters if lineups else None,
+        "referees": p.get("referees", []),
+        "linesmen": p.get("linesmen", []),
+        "coaches": dict(zip(("home", "away"), p.get("coaches", ["", ""]))),
+    }
 
 # ---------- таблица ----------
 
@@ -205,9 +397,14 @@ def links(env=os.environ) -> dict[str, str]:
     return {k: v.rstrip("/") for k, v in out.items() if v.startswith("https://t.me/")}
 
 
-def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results) -> tuple[dict, list[str]]:
+def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results,
+          hidden: set[int] = frozenset()) -> tuple[dict, list[str], dict[str, dict]]:
+    """league.json, непривязанные протоколы и разборы сыгранных матчей по id матча."""
     games = merge_calendar(teams, raw, official_games(teams))
-    unmatched = attach_results(games, teams, results)
+    protocols: dict[str, dict] = {}
+    unmatched = attach_results(games, teams, results, protocols, hidden)
+    names = {t["id"]: t["name"] for t in teams.all}
+    details = {g["id"]: match_detail(g, protocols[g["id"]], names, hidden) for g in games if g["id"] in protocols}
     data = {
         "season": "2026/27",
         "league": "РХЛ — Первенство России U21",
@@ -221,7 +418,7 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results) -> 
         "games": games,
         "standings": standings(teams, games),
     }
-    return data, unmatched
+    return data, unmatched, details
 
 
 def main() -> None:
@@ -231,9 +428,16 @@ def main() -> None:
     args = ap.parse_args()
     teams = load_teams()
     raw = asyncio.run(rhockey.fetch_season())
-    data, unmatched = build(teams, raw, league.load_results(args.results))
+    data, unmatched, details = build(teams, raw, league.load_results(args.results), load_hidden())
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    matches = args.out.parent / "matches"
+    matches.mkdir(exist_ok=True)
+    for old in matches.glob("*.json"):   # матч мог пропасть из календаря — не оставляем чужой файл
+        if old.stem not in details:
+            old.unlink()
+    for gid, d in details.items():
+        (matches / f"{gid}.json").write_text(json.dumps(d, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     h2h = head_to_head(data["games"], load_history())
     (args.out.parent / "h2h.json").write_text(json.dumps(h2h, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     played = sum(1 for g in data["games"] if g.get("score"))
