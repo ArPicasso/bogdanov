@@ -31,7 +31,7 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `docs/adr/` | Архитектурные решения, по файлу на решение |
 | `leaders.json` | Лидеры лиги по шести показателям, по 30 игроков (ADR-009). В git: сейчас НМХЛ 2025/26, после первого тура РХЛ его заменяет задание мини-аппа |
 | `past_clubs.json` | Клубы прошлых сезонов, которых нет в РХЛ: написания и эмблема из `webapp/logos/past/` (ADR-009) |
-| `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания, прежние названия (`former`), цвета формы (`colors`, для Кэпа — ADR-010) |
+| `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания, прежние названия (`former`), цвета формы (`colors`), проводник онбординга (`mascot`: имя и фразы, ADR-011) |
 | `rhockey.py` | Календарь всей лиги с r-hockey.ru — временно, до открытия rhl.fhr.ru |
 | `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица), `h2h.json`, разборы матчей `matches/<id>.json` (ADR-008) и `leaders.json` (ADR-009) |
 | `history.py` | Матчи пяти прошлых сезонов НМХЛ с сайта лиги → `history.json` для очных встреч (ADR-006) |
@@ -41,6 +41,9 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `webapp/brand/` | Иконка для экрана загрузки Telegram и фавиконки (`icon.svg`, `icon-512.png`) |
 | `webapp/logos/` | Эмблемы всех 26 клубов, 200×200 PNG с прозрачным фоном, путь — поле `logo` в `teams.json` |
 | `webapp/players/` | Стикеры игроков вместо фото, 192×192 WebP: в форме клубов — `clubs/<клуб>-skater.webp` и `-goalie.webp`, общие — `skater.webp`, `goalie.webp`; исходники — `art/players/` (ADR-009) |
+| `webapp/mascots/` | Проводники онбординга: `<клуб>-<поза>.webp`, 288×288, позы `hello`, `point`, `cheer`, `shrug` (ADR-011) |
+| `art/mascots/` | Проводники онбординга (ADR-011): промпты Midjourney `prompts.md`, листы `<клуб>.png`, какая фигура листа в какой позе — `poses.json` |
+| `tools/mascot_stickers.py` | Нарезать листы проводников из `art/mascots/` на четыре позы → `webapp/mascots/<клуб>-<поза>.webp` (руками, после новых картинок, ADR-011) |
 | `tools/player_kits.py` | Нарезать стикеры формы из `art/players/clubs/` и найти место номера на майке → `art/players/kits.json` (руками, после новых картинок) |
 | `webapp/story.html`, `webapp/stories/` | Карточки клубов для Telegram Stories и их готовые картинки (ADR-004) |
 | `tools/render_stories.js` | Перерисовать `webapp/stories/` (Playwright, запускается руками) |

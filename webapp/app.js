@@ -866,89 +866,69 @@ function teamGrid(chosen, attr) {
 
 function renderOnboarding() {
   const chosen = state.draft;
-  let html = CAP_ON
-    ? `<section class="band sky"><div class="cap-intro"><span id="cap-onb">${capFig(chosen ? "thumbs" : "hello", chosen)}</span>
-      <div class="bubble" id="cap-say">${capOnbText(chosen)}</div></div>
-    <h1>За кого<br>болеешь?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`
-    : `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
+  let html = `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
   html += teamGrid(chosen, "data-pick");
   const label = chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду";
-  html += `<div style="height:88px"></div><div class="cta-bar${chosen ? "" : " wait"}"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
+  const intro = chosen ? onbGuide(chosen, true) : "";
+  html += `<div class="onb-pad"></div><div class="cta-bar${chosen ? "" : " wait"}"><div class="onb-guide" id="onb-guide"${intro ? "" : " hidden"}>${intro}</div>
+    <button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
   return html;
 }
 
-// ---------- Кэп: знакомство и подсказки (ADR-010) ----------
+// ---------- Проводник — талисман клуба (ADR-011) ----------
 
-// Кэп на паузе: владелец продукта вернётся к идее (ADR-010). Код остаётся, true — включить
-// знакомство на экране выбора команды, тур, «Показать подсказки» и Кэпа в «Не удалось загрузить»
-const CAP_ON = false;
+// У каждого клуба свой проводник: наклейка webapp/mascots/<клуб>-<поза>.webp (режет tools/mascot_stickers.py),
+// имя и фразы — teams.json → mascot. Позы: hello — появление и знакомство, point — подсказки тура,
+// cheer — финал и отклик на нажатие, shrug — «Не удалось загрузить». Нет талисмана — облачко без картинки
 const TOUR_KEY = "tour_done";
+const GUIDE_KEY = "guide_met";   // с чьим проводником болельщик уже знаком: id клуба
 const tourDone = () => lsGet(TOUR_KEY) === "1";
+const guideOf = (club) => (club && state.teams[club] && state.teams[club].mascot) || null;
+const guideSrc = (club, pose) => `mascots/${club}-${pose}.webp`;
 
-// Кэп — пингвин из простых фигур в стиле стикеров бота (stickers/stickers.html): плоские цвета
-// Slush, чёрный контур, белая вырезанная кайма. Позы — поворот крыльев и предмет в кадре.
-// С выбранным клубом он «в его форме»: шлем — основной цвет клуба, полоса и нашивка «К» — второй
-// (teams.json → colors). Нарисован кодом: чёткий на любом размере и одинаковый в обеих темах
-const CAP_FLIP = {   // насколько правое и левое крыло подняты от тела наружу, градусы
-  hello: [135, 10], point: [40, 10], thumbs: [110, 10], shrug: [75, 75], wait: [28, 10], cheer: [150, 150],
-};
-function capSvg(pose = "hello", colors = null) {
-  const [main, second] = colors || ["#4da2ff", "#55db9c"];
-  const onSecond = lum(second) < 0.5 ? "#fff" : "#000";
-  const [r, l] = CAP_FLIP[pose] || CAP_FLIP.hello;
-  const flip = (side, a) => {
-    const x = side > 0 ? 146 : 54;
-    return `<path transform="rotate(${-side * a} ${x} 112)" d="M${x} 108 c${side * 18} 10 ${side * 26} 34 ${side * 22} 58 c${-side * 12} -8 ${-side * 22} -26 ${-side * 26} -46 z" fill="#000" stroke="#000" stroke-width="5" stroke-linejoin="round"/>`;
-  };
-  const extra = {
-    thumbs: `<g transform="translate(150 22) rotate(14)"><path d="m20 2 5 11 12 1.5-9 8 2.5 12L20 28.5 9.5 34.5l2.5-12-9-8 12-1.5z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
-    cheer: `<g transform="translate(146 10) rotate(14)"><path d="m20 2 5 11 12 1.5-9 8 2.5 12L20 28.5 9.5 34.5l2.5-12-9-8 12-1.5z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>
-      <g transform="translate(14 22) rotate(-16)"><path d="M2 12 v8 a22 9 0 0 0 44 0 v-8 z" fill="#000"/><ellipse cx="24" cy="12" rx="22" ry="9" fill="#000" stroke="#fff" stroke-width="2.5"/></g>`,
-    shrug: `<g transform="translate(150 30) rotate(10)"><rect width="30" height="30" rx="15" fill="#e9ccff" stroke="#000" stroke-width="4"/><text x="15" y="22" text-anchor="middle" font-family="Unbounded, sans-serif" font-weight="800" font-size="18">?</text></g>`,
-    wait: `<g transform="translate(150 60) rotate(12)"><path d="M6 0 L30 118 Q33 128 44 128 L58 128 L58 138 L40 138 Q24 138 20 124 L-4 4 Z" fill="#e9ccff" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
-    point: `<g transform="translate(160 176) rotate(-30)"><path d="M0 0 h16 v12 h10 l-18 18 l-18 -18 h10 z" fill="#fb4903" stroke="#000" stroke-width="4" stroke-linejoin="round"/></g>`,
-    hello: "",
-  }[pose] || "";
-  return `<svg class="cap-svg" viewBox="-6 -6 212 232" aria-hidden="true">
-    <defs><filter id="cap-cut-${pose}" x="-10%" y="-10%" width="120%" height="120%">
-      <feMorphology in="SourceAlpha" operator="dilate" radius="5" result="w"/><feFlood flood-color="#fff"/><feComposite in2="w" operator="in" result="white"/>
-      <feMorphology in="SourceAlpha" operator="dilate" radius="6.5" result="b"/><feFlood flood-color="#000"/><feComposite in2="b" operator="in" result="black"/>
-      <feMerge><feMergeNode in="black"/><feMergeNode in="white"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-    <g filter="url(#cap-cut-${pose})">
-      ${flip(-1, l)}${flip(1, r)}
-      <ellipse cx="82" cy="206" rx="17" ry="8" fill="#fb4903" stroke="#000" stroke-width="4"/>
-      <ellipse cx="118" cy="206" rx="17" ry="8" fill="#fb4903" stroke="#000" stroke-width="4"/>
-      <path d="M100 26 C 56 26, 44 78, 46 128 C 48 178, 70 204, 100 204 C 130 204, 152 178, 154 128 C 156 78, 144 26, 100 26 Z" fill="#000"/>
-      <ellipse cx="100" cy="142" rx="38" ry="54" fill="#fff"/>
-      <path d="M70 84 C 70 66, 84 58, 100 62 C 116 58, 130 66, 130 84 C 130 100, 116 108, 100 106 C 84 108, 70 100, 70 84 Z" fill="#fff"/>
-      <circle cx="89" cy="82" r="4.5" fill="#000"/><circle cx="111" cy="82" r="4.5" fill="#000"/>
-      <path d="M91 92 H109 L100 104 Z" fill="#ffd731" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-      <path d="M56 70 C 56 36, 78 20, 100 20 C 122 20, 144 36, 144 70 Z" fill="${main}" stroke="#000" stroke-width="5" stroke-linejoin="round"/>
-      <path d="M92 21 H108 V69 H92 Z" fill="${second}" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-      <rect x="52" y="64" width="96" height="10" rx="5" fill="#000"/>
-      <circle cx="124" cy="132" r="15" fill="${second}" stroke="#000" stroke-width="4"/>
-      <text x="124" y="139" text-anchor="middle" font-family="Unbounded, sans-serif" font-weight="800" font-size="18" fill="${onSecond}">К</text>
-      ${extra}
-    </g></svg>`;
+function guideFig(club, pose) {
+  const g = guideOf(club);
+  if (!g) return "";
+  return `<span class="guide" data-guide="${esc(club)}" role="img" aria-label="${esc(g.name)}"><img src="${guideSrc(esc(club), pose)}" alt="" width="288" height="288" decoding="async"></span>`;
 }
 
-// Относительная яркость цвета #rrggbb: какой текст на нём читается
-function lum(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+// Картинку ждём не дольше 2 секунд: онбординг не стоит из-за медленной сети
+function guideReady(club, pose) {
+  if (!guideOf(club)) return Promise.resolve(false);
+  const img = new Image();
+  img.src = guideSrc(club, pose);
+  const load = img.decode ? img.decode().then(() => true, () => false)
+    : new Promise((done) => { img.onload = () => done(true); img.onerror = () => done(false); });
+  return Promise.race([load, new Promise((done) => setTimeout(() => done(false), 2000))]);
 }
 
-function capFig(pose, club) {
-  return `<span class="cap">${capSvg(pose, club ? team(club).colors : null)}</span>`;
+// Проводник выбранного клуба стоит на кнопке «Готово» и здоровается
+function onbGuide(club, withFig) {
+  const g = guideOf(club);
+  if (!g) return "";
+  return `${withFig ? guideFig(club, "hello") : ""}<div class="bubble" aria-live="polite">${esc(g.hi)} Жми «Готово» — покажу, что тут где.</div>`;
 }
 
-function capOnbText(club) {
-  return club
-    ? `Отличный выбор! Я уже в форме «${esc(team(club).name)}». Жми «Готово» — покажу, что где.`
-    : "Привет! Я Кэп. Выбирай команду — потом покажу, что тут где.";
+// Нажали на проводника — подпрыгивает и на миг радуется
+function guideHop(el) {
+  if (calm() || el.dataset.busy) return;
+  const img = el.querySelector("img");
+  const was = img.getAttribute("src");
+  el.dataset.busy = "1";
+  img.src = guideSrc(el.dataset.guide, "cheer");
+  el.animate([{ transform: "none" }, { transform: "translateY(-14px) rotate(4deg)" }, { transform: "none" }], { duration: 420, easing: EASE_OUT });
+  setTimeout(() => { img.src = was; delete el.dataset.busy; }, 900);
 }
 
-// Тур — три подсказки на живых экранах: облачко Кэпа над меню показывает на вкладку
+// Сменил команду или прошёл тур раньше, с Кэпом, — проводник любимой команды знакомится одним облачком
+function greetGuide() {
+  const g = guideOf(state.fav);
+  if (!g || !tourDone() || lsGet(GUIDE_KEY) === state.fav || state.tour || state.openedFromLink || !$("#sheet").hidden) return;
+  state.tour = { greet: true };
+  showTour("hello", `${esc(g.hi)} Теперь подсказки — от меня.`, `<button type="button" class="btn small" data-tour="done">Привет!</button>`);
+}
+
+// Тур — три подсказки на живых экранах: облачко проводника над меню показывает на вкладку
 const TOUR = [
   { tab: "home", text: "Здесь ближайший матч, последний счёт и место команды в таблице." },
   { tab: "table", players: true, text: "А тут лучшие игроки лиги. Нажми на карточку — будет топ-10." },
@@ -970,7 +950,8 @@ function tourStep() {
     if (state.tab === "table") refreshTable();
   }
   if (state.tab !== s.tab) go(s.tab);
-  const text = (t.step === 0 && t.hello ? "Привет! Я Кэп, покажу, что тут где. " : "") + s.text;
+  const g = guideOf(state.fav);
+  const text = (t.step === 0 && t.hello && g ? `Привет! Я ${esc(g.name)}, покажу, что тут где. ` : "") + s.text;
   showTour("point", text, `<button type="button" class="btn small" data-tour="next">Дальше</button>
     <button type="button" class="tour-skip" data-tour="done">Пропустить</button>
     <span class="tour-count">${t.step + 1} из ${TOUR.length}</span>`, s.tab);
@@ -983,7 +964,8 @@ function tourFinal() {
       `<button type="button" class="btn small" data-tour="remind">Напомнить</button>
        <button type="button" class="tour-skip" data-tour="done">Не сейчас</button>`);
   } else {
-    showTour("cheer", "Всё, болеем! Если что — подсказки можно вернуть в «Я».",
+    const g = guideOf(state.fav);
+    showTour("cheer", g ? `${esc(g.bye)} Подсказки можно вернуть в «Я».` : "Всё, болеем! Если что — подсказки можно вернуть в «Я».",
       `<button type="button" class="btn small" data-tour="done">Поехали</button>`);
   }
 }
@@ -996,10 +978,10 @@ function showTour(pose, text, buttons, tab = "") {
     box.id = "tour";
     box.className = "tour";
     box.setAttribute("role", "dialog");
-    box.setAttribute("aria-label", "Подсказки Кэпа");
+    box.setAttribute("aria-label", "Подсказки");
     document.body.appendChild(box);
   }
-  box.innerHTML = `${capFig(pose, state.fav)}<div class="tour-body"><p aria-live="polite">${text}</p><div class="tour-btns">${buttons}</div></div><i class="tour-arrow" aria-hidden="true"></i>`;
+  box.innerHTML = `${guideFig(state.fav, pose)}<div class="tour-body"><p aria-live="polite">${text}</p><div class="tour-btns">${buttons}</div></div><i class="tour-arrow" aria-hidden="true"></i>`;
   box.dataset.tab = tab;
   placeTourArrow();
   setTimeout(placeTourArrow, 340);   // вкладка меню расширяется — стрелка догоняет её
@@ -1025,6 +1007,7 @@ function placeTourArrow() {
 function finishTour() {
   state.tour = null;
   lsSet(TOUR_KEY, "1");
+  if (state.fav) lsSet(GUIDE_KEY, state.fav);
   if (cloud()) cloud().setItem(TOUR_KEY, "1", () => {});
   const box = $("#tour");
   if (!box) return;
@@ -1064,7 +1047,7 @@ function passport(me) {
   const who = u && u.first_name ? `${esc(u.first_name)} · ` : "";
   const stats = seasonStats(me);
   return `<article class="passport" aria-label="Паспорт болельщика">
-    <div class="pp-top"><span class="pp-tag">Паспорт болельщика</span>${STAR}</div>
+    <div class="pp-top"><span class="pp-tag">Паспорт болельщика</span>${guideOf(me) ? `<span class="pp-guide">${guideFig(me, "hello")}</span>` : STAR}</div>
     <div class="pp-main">${emblem(me, "xl")}
       <div class="pp-name"><small>Болею за</small><b style="--w:${longestChunk(t.name)}">${esc(t.name)}</b></div>
     </div>
@@ -1099,7 +1082,7 @@ function renderMe() {
       : `<div class="menu-row off">${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Пока только о «Рязань-ВДВ». Скоро — о любой команде</small></span></div>`;
   }
   html += `<button type="button" class="menu-row" data-switch-open>${ICON_ME.swap}<span><b>Сменить команду</b><small>Сейчас: ${esc(t.name)}</small></span>${ICON_ME.chev}</button>
-  ${CAP_ON ? `<button type="button" class="menu-row" data-tour-restart>${ICON_ME.help}<span><b>Показать подсказки</b><small>Кэп ещё раз покажет, что где</small></span>${ICON_ME.chev}</button>` : ""}
+  <button type="button" class="menu-row" data-tour-restart>${ICON_ME.help}<span><b>Показать подсказки</b><small>${guideOf(me) ? `${esc(guideOf(me).name)} ещё раз покажет, что где` : "Ещё раз покажем, что где"}</small></span>${ICON_ME.chev}</button>
   </div>`;
   html += themePills();
   return html + footer();
@@ -1171,7 +1154,8 @@ function h2hSkeleton() {
   return `<div class="sk sk-label"></div><div class="sk" style="height:152px"></div><div class="sk sk-label"></div><div class="sk" style="height:${5 * 75}px"></div>`;
 }
 function failBlock(title, what) {
-  return `<div class="label">${title}</div><div class="empty${CAP_ON ? " cap-empty" : ""}">${CAP_ON ? capFig("shrug") : ""}<div>Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div></div>`;
+  const fig = guideFig(state.fav, "shrug");
+  return `<div class="label">${title}</div><div class="empty${fig ? " guide-empty" : ""}">${fig}<div>Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div></div>`;
 }
 function fadeIn(el) {
   if (el && !calm()) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
@@ -1780,13 +1764,16 @@ function confirmTeam(id = state.draft || state.fav) {
   state.tab = !wasFav && state.tableView === "players" ? "table" : "home";
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render(dir);
-  // новичок, пришедший не по ссылке, — Кэп показывает приложение (ADR-010)
-  if (CAP_ON && !wasFav && !tourDone() && !state.openedFromLink) nextFrame(() => startTour(false));
+  // новичок, пришедший не по ссылке, — проводник показывает приложение (ADR-011);
+  // сменил команду — новый проводник знакомится, когда закроется лист
+  if (!wasFav && !tourDone() && !state.openedFromLink) nextFrame(() => startTour(false));
+  else if (wasFav && wasFav !== id) setTimeout(greetGuide, 450);
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-open],[data-tour],[data-tour-restart],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-open],[data-tour],[data-tour-restart],[data-guide],#sheet-backdrop");
   if (!el || el.disabled) return;
+  if (el.dataset.guide) return guideHop(el);
   if (el.dataset.tour) {
     haptic();
     if (el.dataset.tour === "next" && state.tour) {
@@ -1879,13 +1866,16 @@ document.addEventListener("click", (e) => {
     el.classList.remove("pop");
     void el.offsetWidth;   // перезапустить анимацию на той же карточке
     el.classList.add("pop");
-    // Кэп переодевается в форму выбранного клуба (ADR-010)
-    const cap = $("#cap-onb");
-    if (cap) {
-      cap.innerHTML = capFig("thumbs", state.draft);
-      $("#cap-say").innerHTML = capOnbText(state.draft);
-      if (!calm()) cap.firstElementChild.animate([{ transform: "scale(.8) rotate(-12deg)" }, { transform: "none" }], { duration: 320, easing: "cubic-bezier(.2, 1.6, .4, 1)" });
-    }
+    // проводник выбранного клуба выпрыгивает на кнопку «Готово» (ADR-011)
+    const club = state.draft;
+    guideReady(club, "hello").then((ok) => {
+      const box = $("#onb-guide");
+      if (!box || state.draft !== club) return;   // уже выбрали другой клуб
+      box.innerHTML = onbGuide(club, ok);
+      box.hidden = !box.innerHTML;
+      const fig = box.querySelector(".guide");
+      if (fig && !calm()) fig.animate([{ transform: "scale(.5) rotate(-16deg)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 340, easing: "cubic-bezier(.2, 1.6, .4, 1)" });
+    });
     const btn = $("[data-confirm]");
     btn.disabled = false;
     btn.textContent = `Готово — ${team(state.draft).name}`;
@@ -2099,9 +2089,13 @@ function boot(d, cached = false) {
     state.openedFromLink = true;
     openMatch(mid);
   }
-  // Кэп знакомится и с теми, кто выбрал команду раньше, — один раз и не поверх ссылки из бота
-  if (CAP_ON && state.fav && !tourDone() && !state.openedFromLink && !state.tour) {
-    setTimeout(() => { if (!state.tour && !tourDone() && $("#sheet").hidden) startTour(true); }, (cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS) + 500);
+  // проводник знакомится и с теми, кто выбрал команду раньше, — один раз и не поверх ссылки из бота
+  if (state.fav && !state.openedFromLink && !state.tour) {
+    setTimeout(() => {
+      if (state.tour || !$("#sheet").hidden) return;
+      if (!tourDone()) startTour(true);
+      else greetGuide();
+    }, (cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS) + 500);
   }
 }
 
