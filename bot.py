@@ -51,9 +51,39 @@ GAMES = sorted(
 # id команды → название: для диплинка /start <id> (ADR-005)
 TEAMS = {t["id"]: t["name"] for t in json.loads((BASE / "teams.json").read_text(encoding="utf-8"))}
 
+# ---------- свои эмодзи ----------
+# Набор rhl_u21_by_<бот> (tools/upload_emoji.py) в порядке stickers/emoji.json. Писать ими бот
+# может, пока у владельца бота есть Telegram Premium (Bot API, MessageEntity). Не вышло —
+# emoji_off() и то же сообщение обычными эмодзи.
+
+EMOJI = json.loads((STICKERS / "emoji.json").read_text(encoding="utf-8"))   # имя → обычный эмодзи
+CUSTOM: dict[str, str] = {}   # имя → custom_emoji_id, заполняет load_custom_emoji() при запуске
+
+
+def custom_ids(set_stickers: list) -> dict[str, str]:
+    """Сопоставить стикеры набора именам из emoji.json: порядок тот же, в каком их загрузили."""
+    return {n: st.custom_emoji_id for n, st in zip(EMOJI, set_stickers) if st.custom_emoji_id}
+
+
+def e(name: str) -> str:
+    """Свой эмодзи, если набор загружен, иначе обычный."""
+    plain = EMOJI[name]
+    if name in CUSTOM:
+        return f'<tg-emoji emoji-id="{CUSTOM[name]}">{plain}</tg-emoji>'
+    return plain
+
+
+def emoji_off(err: Exception) -> bool:
+    """Telegram не принял свои эмодзи: дальше пишем обычными. True — есть смысл повторить."""
+    if not CUSTOM:
+        return False
+    logging.warning("custom emoji off: %s", err)
+    CUSTOM.clear()
+    return True
+
 # ---------- тексты и кнопки ----------
 
-B_APP = "🏒 Открыть РХЛ"
+B_APP = "Открыть РХЛ"
 
 # видно в пустом чате до «Старт» и в профиле бота (до 512 и 120 символов)
 DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.\n\n"
@@ -61,7 +91,6 @@ DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.
                "🔔 Напоминания перед играми\n\n"
                "Жми «Старт» 👇")
 SHORT_DESCRIPTION = "РХЛ U21: календарь, таблица и счёт матчей. Напомню перед игрой 🏒"
-LOST_TEXT = "Всё самое интересное — в приложении. Жми кнопку 👇"
 
 
 def app_url(team: str | None = None) -> str:
@@ -74,16 +103,26 @@ def app_url(team: str | None = None) -> str:
 
 def app_kb(team: str | None = None) -> InlineKeyboardMarkup:
     """Одна кнопка — открыть мини-апп."""
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=B_APP, web_app=WebAppInfo(url=app_url(team)))]])
+    web_app = WebAppInfo(url=app_url(team))
+    if "puck" in CUSTOM:   # значок на кнопке — наша шайба
+        btn = InlineKeyboardButton(text=B_APP, icon_custom_emoji_id=CUSTOM["puck"], web_app=web_app)
+    else:
+        btn = InlineKeyboardButton(text=f"{EMOJI['puck']} {B_APP}", web_app=web_app)
+    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 
 def welcome_text(team: str | None = None) -> str:
-    head = (f"Здарова! Открываю РХЛ с командой <b>«{html.escape(TEAMS[team])}»</b> 🏒" if team
-            else "Здарова! Это РХЛ U21 — всё про лигу в одном месте 🏒")
+    head = (f"Здарова! Открываю РХЛ с командой <b>«{html.escape(TEAMS[team])}»</b> {e('rhl')}" if team
+            else f"Здарова! Это РХЛ U21 — всё про лигу в одном месте {e('rhl')}")
     return (f"{head}\n\n"
-            "Календарь 26 команд, таблица и счёт матчей — в приложении.\n\n"
+            f"{e('star')} Календарь 26 команд\n"
+            f"{e('cup')} Таблица конференций\n"
+            f"{e('goal')} Счёт и голы матчей\n\n"
             "<b>Жми «Открыть РХЛ»</b> 👇 и выбери, за кого болеешь.")
+
+
+def lost_text() -> str:
+    return f"Всё самое интересное — в приложении {e('fire')}\nЖми кнопку 👇"
 
 # ---------- напоминания: подписчики ----------
 
@@ -109,15 +148,15 @@ def remind_kb(chat_id: int) -> InlineKeyboardMarkup:
 
 def remind_text(chat_id: int) -> str:
     state = "✅ включены" if chat_id in SUBS else "❌ выключены"
-    return (f"🔔 Напоминания о матчах «{REMIND_TEAM}» {state}\n\n"
+    return (f"{e('bell')} Напоминания о матчах «{REMIND_TEAM}» {state}\n\n"
             f"Пришлю сообщение накануне игры в {REMIND_TOMORROW_AT:%H:%M} "
             f"и в день игры в {REMIND_TODAY_AT:%H:%M} (МСК).")
 
 
 def reminder_text(g: Game, kind: str) -> str:
     head = "Сегодня игра!" if kind == "today" else "Завтра игра!"
-    where = "🏠 Дома" if g.home else "✈️ На выезде"
-    return (f"🔔 <b>{head}</b>\n\n{DOW[g.d.weekday()]} {g.d:%d.%m} · {REMIND_TEAM} — "
+    where = f"{e('home')} Дома" if g.home else f"{e('away')} На выезде"
+    return (f"{e('bell')} <b>{head}</b>\n\n{DOW[g.d.weekday()]} {g.d:%d.%m} · {REMIND_TEAM} — "
             f"<b>{html.escape(g.opponent)}</b>\n{where}")
 
 # ---------- стикеры ----------
@@ -142,11 +181,25 @@ async def send_sticker(bot: Bot, chat_id: int, name: str, **kw) -> bool:
 dp = Dispatcher()
 
 
-async def safe_edit(c: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup) -> None:
+async def say(bot: Bot, chat_id: int, make) -> None:
+    """Отправить make() → (текст, клавиатура); если Telegram не принял свои эмодзи — обычными."""
     try:
-        await c.message.edit_text(text, reply_markup=reply_markup)
-    except TelegramBadRequest:   # текст и клавиатура не изменились
-        pass
+        text, kb = make()
+        await bot.send_message(chat_id, text, reply_markup=kb)
+    except TelegramBadRequest as err:
+        if not emoji_off(err):
+            raise
+        text, kb = make()
+        await bot.send_message(chat_id, text, reply_markup=kb)
+
+
+async def safe_edit(c: CallbackQuery, make) -> None:
+    text, kb = make()
+    try:
+        await c.message.edit_text(text, reply_markup=kb)
+    except TelegramBadRequest as err:   # «message is not modified» — молча, свои эмодзи — повтор
+        if "not modified" not in str(err) and emoji_off(err):
+            await safe_edit(c, make)
 
 
 @dp.message(CommandStart())
@@ -154,16 +207,18 @@ async def start(m: Message, command: CommandObject):
     # стикер заодно убирает клавиатуру, если она осталась от прошлой версии бота
     if not await send_sticker(m.bot, m.chat.id, "hello", reply_markup=ReplyKeyboardRemove()):
         await m.answer("🏒", reply_markup=ReplyKeyboardRemove())
+    cid = m.chat.id
     if command.args == "remind":   # из мини-аппа, экран «Я» (ADR-004)
-        await m.answer(remind_text(m.chat.id), reply_markup=remind_kb(m.chat.id))
+        await say(m.bot, cid, lambda: (remind_text(cid), remind_kb(cid)))
         return
     team = command.args if command.args in TEAMS else None
-    await m.answer(welcome_text(team), reply_markup=app_kb(team))
+    await say(m.bot, cid, lambda: (welcome_text(team), app_kb(team)))
 
 
 @dp.message(Command("remind"))
 async def h_remind(m: Message):
-    await m.answer(remind_text(m.chat.id), reply_markup=remind_kb(m.chat.id))
+    cid = m.chat.id
+    await say(m.bot, cid, lambda: (remind_text(cid), remind_kb(cid)))
 
 
 @dp.callback_query(F.data == "r:toggle")
@@ -171,7 +226,7 @@ async def cb_remind(c: CallbackQuery):
     cid = c.message.chat.id
     SUBS.symmetric_difference_update({cid})
     save_subs(SUBS)
-    await safe_edit(c, remind_text(cid), remind_kb(cid))
+    await safe_edit(c, lambda: (remind_text(cid), remind_kb(cid)))
     await c.answer("Готово")
     if cid in SUBS:
         await send_sticker(c.bot, cid, "bell")
@@ -180,7 +235,7 @@ async def cb_remind(c: CallbackQuery):
 @dp.message()   # последним: всё остальное (ADR-005 — бот не молчит)
 async def h_lost(m: Message):
     await send_sticker(m.bot, m.chat.id, "tap", reply_markup=ReplyKeyboardRemove())
-    await m.answer(LOST_TEXT, reply_markup=app_kb())
+    await say(m.bot, m.chat.id, lambda: (lost_text(), app_kb()))
 
 # ---------- напоминания ----------
 
@@ -199,12 +254,12 @@ async def reminder_loop(bot: Bot):
         games = [g for g in GAMES if g.d == day]
         if not games:
             continue
-        text = reminder_text(games[0], kind)
+        g = games[0]
         for cid in list(SUBS):
             try:
                 if kind == "today":
                     await send_sticker(bot, cid, "gameday")
-                await bot.send_message(cid, text, reply_markup=app_kb())
+                await say(bot, cid, lambda: (reminder_text(g, kind), app_kb()))
             except TelegramForbiddenError:   # бота заблокировали
                 SUBS.discard(cid)
                 save_subs(SUBS)
@@ -213,9 +268,21 @@ async def reminder_loop(bot: Bot):
             await asyncio.sleep(0.05)
 
 
+async def load_custom_emoji(bot: Bot) -> None:
+    try:
+        me = await bot.get_me()
+        st = await bot.get_sticker_set(f"rhl_u21_by_{me.username}")
+    except TelegramBadRequest:   # набор не опубликован — пишем обычными эмодзи
+        logging.warning("custom emoji set not found, plain emoji")
+        return
+    CUSTOM.update(custom_ids(st.stickers))
+    logging.info("custom emoji: %d", len(CUSTOM))
+
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     bot = Bot(os.environ["BOT_TOKEN"], default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await load_custom_emoji(bot)
     await bot.delete_my_commands()   # меню команд пустое: всё — в мини-аппе
     try:   # описание не критично: без него бот работает
         await bot.set_my_description(DESCRIPTION)

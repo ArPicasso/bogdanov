@@ -50,6 +50,31 @@ class Welcome(unittest.TestCase):
         self.assertLessEqual(len(bot.SHORT_DESCRIPTION), 120)
 
 
+class CustomEmoji(unittest.TestCase):
+    def tearDown(self):
+        bot.CUSTOM.clear()
+
+    def test_plain_without_set(self):
+        self.assertEqual(bot.e("puck"), "🏒")
+        btn = bot.app_kb().inline_keyboard[0][0]
+        self.assertEqual(btn.text, "🏒 Открыть РХЛ")
+        self.assertIsNone(btn.icon_custom_emoji_id)
+
+    def test_custom_from_set_in_upload_order(self):
+        stickers = [mock.Mock(custom_emoji_id=f"id{i}") for i in range(len(bot.EMOJI))]
+        bot.CUSTOM.update(bot.custom_ids(stickers))
+        self.assertEqual(bot.e("puck"), '<tg-emoji emoji-id="id0">🏒</tg-emoji>')
+        self.assertIn('emoji-id="id', bot.welcome_text())
+        btn = bot.app_kb().inline_keyboard[0][0]
+        self.assertEqual((btn.text, btn.icon_custom_emoji_id), ("Открыть РХЛ", "id0"))
+
+    def test_emoji_off_falls_back(self):
+        bot.CUSTOM["puck"] = "id0"
+        self.assertTrue(bot.emoji_off(Exception("ENTITY_TEXT_INVALID")))
+        self.assertEqual(bot.e("puck"), "🏒")
+        self.assertFalse(bot.emoji_off(Exception("again")))   # второй раз не повторяем
+
+
 class Stickers(unittest.TestCase):
     def test_every_sticker_used_in_bot_exists(self):
         names = set(re.findall(r'send_sticker\([^)]*"(\w+)"', (ROOT / "bot.py").read_text(encoding="utf-8")))
