@@ -801,30 +801,12 @@ function leadersBody() {
   return html;
 }
 
-// Фигура игрока вместо фото (ADR-009): полевой — шлем с визором, вратарь — маска поднята на лоб, лицо открыто.
-// Наклейка одинаковая в обеих темах, как эмблемы: чёрный контур, постоянные цвета стикеров
+// Стикер игрока вместо фото (ADR-009): картинка из webapp/players/ — полевой или вратарь,
+// номер на груди ставим сами, поэтому одна картинка годится всем
 function figure(r) {
   const goalie = r.role === "G";
-  const num = r.number != null ? `<text x="24" y="44.2" class="fg-num">${esc(r.number)}</text>` : "";
-  const body = goalie
-    ? `<path class="fg-shirt" d="M1 49C2 36 10 31 24 31S46 36 47 49Z"/>
-       <path class="fg-line" d="M9 36.5c2.5 1.6 4 4.5 4.4 8M39 36.5c-2.5 1.6-4 4.5-4.4 8"/>
-       <circle class="fg-face" cx="24" cy="23.6" r="7.6"/>
-       <circle class="fg-eye" cx="21.4" cy="23.4" r="1.05"/><circle class="fg-eye" cx="26.6" cy="23.4" r="1.05"/>
-       <path class="fg-line" d="M21.9 26.6c1.2 1 3 1 4.2 0"/>
-       <path class="fg-mask" d="M15.8 19.6C15.6 13.4 19.3 10.4 24 10.4s8.4 3 8.2 9.2Z"/>
-       <rect class="fg-face" x="18.2" y="4.6" width="11.6" height="7.4" rx="2.6"/>
-       <path class="fg-cage" d="M21.1 4.8v7M24 4.6v7.4M26.9 4.8v7M18.4 8.3h11.2"/>`
-    : `<path class="fg-stick" d="M41.5 5.5 35 30"/>
-       <path class="fg-shirt" d="M4 49C5 37.5 12 32.5 24 32.5S43 37.5 44 49Z"/>
-       <path class="fg-line" d="M19.5 32.8 24 37l4.5-4.2"/>
-       <circle class="fg-face" cx="24" cy="22" r="8.2"/>
-       <path class="fg-helmet" d="M15.6 22.4C15.3 15.2 19 11.6 24 11.6s8.7 3.6 8.4 10.8Z"/>
-       <path class="fg-visor" d="M16 21.8h16v1.6c0 1.2-1 2.2-2.2 2.2H18.2c-1.2 0-2.2-1-2.2-2.2Z"/>
-       <circle class="fg-eye" cx="21.4" cy="23.7" r="1.05"/><circle class="fg-eye" cx="26.6" cy="23.7" r="1.05"/>
-       <path class="fg-line" d="M21.9 27.4c1.2 1 3 1 4.2 0"/>`;
-  return `<svg class="fig${goalie ? " goalie" : ""}" viewBox="0 0 48 48" aria-hidden="true"><circle class="fg-bg" cx="24" cy="24" r="24"/>
-    ${body}${num}<circle class="fg-ring" cx="24" cy="24" r="23.5"/></svg>`;
+  const num = r.number != null ? `<b class="fig-num">${esc(r.number)}</b>` : "";
+  return `<span class="fig${goalie ? " goalie" : ""}" aria-hidden="true"><img src="players/${goalie ? "goalie" : "skater"}.webp" alt="" decoding="async">${num}</span>`;
 }
 
 // Топ-10 показателя — в листе снизу, как карточка матча: одно число в строке, остальное — подписью
