@@ -29,9 +29,10 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `results.json` | Результаты: id турнира → номер матча `n` (как в `games.json`) → протокол. Не в git |
 | `tests/` | Тесты на `unittest`, фикстуры — реальные страницы сайта лиги |
 | `docs/adr/` | Архитектурные решения, по файлу на решение |
+| `leaders.json` | Лидеры лиги по шести показателям, по 30 игроков (ADR-009). В git: сейчас НМХЛ 2025/26, после первого тура РХЛ его заменяет задание мини-аппа |
 | `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания, прежние названия (`former`) |
 | `rhockey.py` | Календарь всей лиги с r-hockey.ru — временно, до открытия rhl.fhr.ru |
-| `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица), `h2h.json` и разборы матчей `matches/<id>.json` (ADR-008) |
+| `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица), `h2h.json`, разборы матчей `matches/<id>.json` (ADR-008) и `leaders.json` (ADR-009) |
 | `history.py` | Матчи пяти прошлых сезонов НМХЛ с сайта лиги → `history.json` для очных встреч (ADR-006) |
 | `history.json` | Прошлые сезоны, команды уже в id из `teams.json`. В git, пересобирается руками раз в сезон |
 | `history_protocols.json` | Протоколы прошлых матчей из «Последних встреч» для их разбора (ADR-008). В git, докачивается `history.py --protocols` |
@@ -60,6 +61,7 @@ venv/bin/pip install -r requirements.txt
 BOT_TOKEN=... venv/bin/python bot.py
 venv/bin/python -m unittest discover -s tests   # тесты
 venv/bin/python league.py                        # скачать протоколы в results.json
+venv/bin/python league.py --leaders              # лидеры лиги в leaders.json (ADR-009)
 venv/bin/python history.py                       # прошлые сезоны в history.json (раз в сезон)
 venv/bin/python history.py --protocols           # затем протоколы прошлых встреч, ~30 минут
 venv/bin/python build_data.py                    # собрать webapp/data/league.json и h2h.json

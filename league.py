@@ -368,6 +368,55 @@ def parse_tournaments(html: str) -> list[tuple[int, str]]:
     opts = re.findall(r'value="/calendar/(\d+)/"[^>]*>([^<]+)', html)
     return list(dict.fromkeys((int(i), name.strip()) for i, name in opts))
 
+# ---------- лидеры лиги (ADR-009) ----------
+
+LEADERS_FILE = BASE / "leaders.json"
+LEADER_CATS = ("pts", "g", "a", "pm", "sv_pct", "pim")   # показатель в адресе /stat/leaders/<турнир>/<показатель>/
+ROLE_NAMES = {"вратарь": "G", "защитник": "D", "нападающий": "F"}
+LEADER_COLS = {"№": "number", "И": "gp", "Ш": "g", "А": "a", "О": "pts", "+/-": "pm", "Штр": "pim",
+               "ШП": "gwg", "В": "w", "П": "l", "И\"0\"": "so", "ВП": "toi", "%ОБ": "sv_pct", "КН": "gaa"}
+
+
+def _num(v: str) -> int | float | None:
+    v = v.replace(",", ".")
+    if re.fullmatch(r"-?\d+", v):
+        return int(v)
+    return float(v) if re.fullmatch(r"-?\d+\.\d+", v) else None
+
+
+def parse_leaders(html: str) -> list[dict]:
+    """Список лидеров лиги по одному показателю, как на сайте: место, игрок, клуб, цифры."""
+    table = parse_html(html).find("table", "tablesorter")
+    if not table:
+        return []
+    rows = table.find_all("tr")
+    if not rows:
+        return []
+    head = [th.text() for th in rows[0].find_all("th")]
+    out = []
+    for tr in rows[1:]:
+        tds = _cells(tr)
+        if len(tds) != len(head) or not tds[0].text().isdigit():
+            continue
+        row: dict = {"rank": int(tds[0].text())}
+        for h, td in zip(head[1:], tds[1:]):
+            v = td.text()
+            if h == "Игрок":
+                a = td.find("a")
+                pid = PLAYER_HREF.search(a.attrs.get("href", "")) if a else None
+                row["name"], row["id"] = v, int(pid.group(1)) if pid else None
+            elif h == "Клуб":
+                row["club"] = v
+            elif h == "Амплуа":
+                row["role"] = ROLE_NAMES.get(v.lower(), "")
+            elif h == "ВП":
+                row["toi"] = v
+            elif h in LEADER_COLS:
+                row[LEADER_COLS[h]] = _num(v)
+        if row.get("name"):
+            out.append(row)
+    return out
+
 # ---------- загрузка ----------
 
 
@@ -377,19 +426,29 @@ async def _get(session: aiohttp.ClientSession, url: str) -> str:
         return await r.text()
 
 
+def _session() -> aiohttp.ClientSession:
+    return aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, timeout=aiohttp.ClientTimeout(total=30),
+                                 trust_env=True)
+
+
+async def _tournament(s: aiohttp.ClientSession, site: str, tournament: int | None) -> tuple[int, str]:
+    """Id и название турнира; без id — последний регулярный чемпионат из календаря лиги."""
+    found = parse_tournaments(await _get(s, f"{site}/calendar/"))
+    await asyncio.sleep(PAUSE)
+    if tournament is not None:
+        return tournament, dict(found).get(tournament, "")
+    regular = [(i, name) for i, name in found if "Регулярный" in name]
+    if not regular:
+        raise RuntimeError("не нашёл регулярный чемпионат в календаре лиги")
+    return regular[0]
+
+
 async def fetch_protocols(site: str, tournament: int | None = None, club: str | None = None,
                           skip: set[int] = frozenset()) -> tuple[int, list[Protocol]]:
     """Протоколы турнира: всей лиги или одного клуба. Запросы идут по одному с паузой."""
-    headers = {"User-Agent": USER_AGENT}
-    timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(headers=headers, timeout=timeout, trust_env=True) as s:
+    async with _session() as s:
         if tournament is None:
-            regular = [i for i, name in parse_tournaments(await _get(s, f"{site}/calendar/"))
-                       if "Регулярный" in name]
-            if not regular:
-                raise RuntimeError("не нашёл регулярный чемпионат в календаре лиги")
-            tournament = regular[0]
-            await asyncio.sleep(PAUSE)
+            tournament, _ = await _tournament(s, site, None)
         cal = await _get(s, f"{site}/calendar/{tournament}/")
         if club:
             clubs = {name: cid for name, cid in parse_club_ids(cal, tournament).items() if club in name}
@@ -443,14 +502,48 @@ async def update_results(site: str, tournament: int | None, club: str | None, pa
     return fresh
 
 
+async def fetch_leaders(site: str, tournament: int | None = None) -> dict:
+    """Лидеры турнира по каждому показателю из LEADER_CATS (ADR-009)."""
+    async with _session() as s:
+        tournament, name = await _tournament(s, site, tournament)
+        cats = {}
+        for i, cat in enumerate(LEADER_CATS):
+            if i:
+                await asyncio.sleep(PAUSE)
+            cats[cat] = parse_leaders(await _get(s, f"{site}/stat/leaders/{tournament}/{cat}/"))
+    return {"site": site, "tournament": tournament, "name": name,
+            "updated": datetime.now(TZ).isoformat(timespec="minutes"), "categories": cats}
+
+
+def update_leaders(site: str, tournament: int | None, path: Path = LEADERS_FILE) -> dict | None:
+    """None — у сезона ещё нет статистики: файл остаётся прежним, с прошлым сезоном."""
+    data = asyncio.run(fetch_leaders(site, tournament))
+    if not any(data["categories"].values()):
+        return None
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(path)
+    return data
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     ap = argparse.ArgumentParser(description="Скачать протоколы матчей с сайта лиги в results.json")
     ap.add_argument("--site", default=DEFAULT_SITE)
     ap.add_argument("--tournament", type=int, help="id турнира; по умолчанию — последний регулярный чемпионат")
     ap.add_argument("--club", help="часть названия клуба; по умолчанию — вся лига")
-    ap.add_argument("--out", type=Path, default=RESULTS_FILE)
+    ap.add_argument("--leaders", action="store_true", help="вместо протоколов — лидеры лиги в leaders.json (ADR-009)")
+    ap.add_argument("--out", type=Path, help=f"по умолчанию {RESULTS_FILE.name} или {LEADERS_FILE.name}")
     args = ap.parse_args()
+    if args.leaders:
+        data = update_leaders(args.site, args.tournament, args.out or LEADERS_FILE)
+        if data is None:
+            print("У сезона ещё нет статистики — лидеры не обновлены")
+        else:
+            counts = ", ".join(f"{k} {len(v)}" for k, v in data["categories"].items())
+            print(f"Лидеры турнира {data['tournament']} «{data['name']}»: {counts} → {args.out or LEADERS_FILE}")
+        return
+    args.out = args.out or RESULTS_FILE
     fresh = asyncio.run(update_results(args.site, args.tournament, args.club, args.out))
     for p in sorted(fresh, key=lambda p: p.date):
         print(f"{p.date} №{p.n} {p.home} {p.home_score}:{p.away_score} {p.decision} {p.away}".rstrip())

@@ -482,6 +482,51 @@ def head_to_head(games: list[dict], history: list[dict], with_protocol: set[str]
                     "last": meetings[::-1][:H2H_LAST]}
     return out
 
+# ---------- лидеры лиги (ADR-009) ----------
+
+LEADERS_TOP = 10
+# цифры, которые мини-апп показывает у каждого показателя: остальное из строки лиги не берём
+LEADER_FIELDS = {"pts": ("gp", "g", "a", "pts"), "g": ("gp", "g", "a", "pts"), "a": ("gp", "g", "a", "pts"),
+                 "pm": ("gp", "pts", "pm"), "pim": ("gp", "pts", "pim"), "sv_pct": ("gp", "gaa", "sv_pct")}
+
+
+def load_leaders(path: Path = league.LEADERS_FILE) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset()) -> dict | None:
+    """Топ-10 по каждому показателю и лучший игрок каждой команды с 11-го места.
+
+    Места — как у лиги. Скрытого игрока нет в списке, место за ним остаётся пустым.
+    Клуб прошлого сезона — нынешний id по teams.json; клуба нет в РХЛ — только название."""
+    if not src.get("categories"):
+        return None
+    m = re.match(r"(\d{2})/(\d{2})", src.get("name", ""))
+    out = {
+        "season": f"20{m.group(1)}/{m.group(2)}" if m else "",
+        "league": "РХЛ" if "rhl." in src.get("site", "") else "НМХЛ",
+        "stage": "плей-офф" if "Плей-офф" in src.get("name", "") else "регулярный чемпионат",
+        "updated": src.get("updated", ""),
+        "categories": {},
+    }
+    for cat, fields in LEADER_FIELDS.items():
+        rows, seen = [], set()
+        for r in src["categories"].get(cat, []):
+            if r.get("id") in hidden:
+                continue
+            tid = teams.find_past(r.get("club", ""))
+            if r["rank"] > LEADERS_TOP and (tid is None or tid in seen):
+                continue
+            seen.add(tid)
+            row = {"rank": r["rank"], "name": r["name"], **{k: r.get(k) for k in fields}}
+            row.update({"team": tid} if tid else {"club": r.get("club", "")})
+            rows.append(row)
+        out["categories"][cat] = rows
+    return out
+
 # ---------- сборка ----------
 
 
@@ -542,6 +587,9 @@ def main() -> None:
             old.unlink()
     for gid, d in details.items():
         (matches / f"{gid}.json").write_text(json.dumps(d, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    top = leaders(teams, load_leaders(), load_hidden())
+    if top:
+        (args.out.parent / "leaders.json").write_text(json.dumps(top, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     played = sum(1 for g in data["games"] if g.get("score"))
     print(f"Матчей: {len(data['games'])}, сыграно: {played} → {args.out}")
     for u in unmatched:

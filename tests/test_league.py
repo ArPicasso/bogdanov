@@ -170,5 +170,24 @@ class ResultsFile(unittest.TestCase):
         self.assertEqual(league.load_results(Path("/nonexistent/results.json")), {})
 
 
+class Leaders(unittest.TestCase):
+    """ADR-009: списки лидеров лиги, места и порядок — как на сайте."""
+
+    def test_scorers(self):
+        rows = league.parse_leaders(fixture("leaders_1378_pts.html"))
+        self.assertEqual(len(rows), 30)
+        self.assertEqual(rows[0], {"rank": 1, "name": "Султанов Реваль", "id": 43454, "club": "Полёт", "role": "F",
+                                   "number": 8, "gp": 49, "g": 39, "a": 39, "pts": 78, "pm": 10, "pim": 50})
+        self.assertEqual([r["rank"] for r in rows], list(range(1, 31)))
+
+    def test_goalies(self):
+        top = league.parse_leaders(fixture("leaders_1378_sv_pct.html"))[0]
+        self.assertEqual((top["name"], top["role"], top["gp"]), ("Владычек Александр", "G", 42))
+        self.assertEqual((top["sv_pct"], top["gaa"], top["so"], top["toi"]), (94.4, 1.51, 10, "2499:16"))
+
+    def test_other_page_gives_nothing(self):
+        self.assertEqual(league.parse_leaders(fixture("calendar_index.html")), [])
+
+
 if __name__ == "__main__":
     unittest.main()
