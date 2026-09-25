@@ -791,7 +791,8 @@ function boot(d) {
   useData(d);
   const fromLink = startParam();
   const saved = lsGet(FAV_KEY);
-  const fav = [fromLink, saved].find((id) => id && state.teams[id]);
+  // Ссылка с командой выбирает её только новичку: приглашение от друга не перезаписывает свой клуб
+  const fav = [saved, fromLink].find((id) => id && state.teams[id]);
   if (fav) {
     pickFav(fav);
     if (fromLink === fav && fav !== saved) saveFav(fav);

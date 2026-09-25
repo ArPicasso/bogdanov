@@ -148,9 +148,13 @@ def standings(teams: Teams, games: list[dict]) -> dict[str, list[dict]]:
 # ---------- сборка ----------
 
 
+BOT_LINK = "https://t.me/rhl_u21_bot"
+APP_LINK = "https://t.me/rhl_u21_bot/myapp"
+
+
 def links(env=os.environ) -> dict[str, str]:
-    """Ссылки на бота и мини-апп в Telegram (ADR-004). Пустые не пишем — мини-апп их спрячет."""
-    out = {"bot": env.get("BOT_LINK", "").strip(), "app": env.get("APP_LINK", "").strip()}
+    """Ссылки на бота и мини-апп в Telegram (ADR-004). Переменные окружения заменяют ссылки по умолчанию."""
+    out = {"bot": (env.get("BOT_LINK") or BOT_LINK).strip(), "app": (env.get("APP_LINK") or APP_LINK).strip()}
     return {k: v.rstrip("/") for k, v in out.items() if v.startswith("https://t.me/")}
 
 

@@ -45,7 +45,7 @@ jobs:
         continue-on-error: true
         run: python league.py --site "${{ vars.LEAGUE_SITE }}"
 
-      # Ссылки на бота и мини-апп (ADR-004): Settings → Variables → BOT_LINK, APP_LINK
+      # Ссылки на бота и мини-апп (ADR-004) заданы в build_data.py; Variables BOT_LINK, APP_LINK их заменяют
       - name: Собрать данные
         env:
           BOT_LINK: ${{ vars.BOT_LINK }}

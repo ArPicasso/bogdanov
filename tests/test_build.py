@@ -99,5 +99,5 @@ class Links(unittest.TestCase):
         env = {"BOT_LINK": "https://t.me/rhl_bot/", "APP_LINK": "http://evil.example/app"}
         self.assertEqual(b.links(env), {"bot": "https://t.me/rhl_bot"})
 
-    def test_empty(self):
-        self.assertEqual(b.links({}), {})
+    def test_defaults(self):
+        self.assertEqual(b.links({}), {"bot": "https://t.me/rhl_u21_bot", "app": "https://t.me/rhl_u21_bot/myapp"})
