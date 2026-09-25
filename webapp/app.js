@@ -771,7 +771,12 @@ function goalsTab(g, d) {
       </div>`;
     }
   }
-  return html + `</div>`;
+  html += `</div>`;
+  // победная не последняя (5:2 — победная 3:1) — объясняем, иначе похоже на ошибку
+  if (d && d.gw != null && g.goals && d.gw < g.goals.length - 1) {
+    html += `<div class="note">Победная шайба — та, после которой соперник уже не сравнял счёт. Так её считает лига.</div>`;
+  }
+  return html;
 }
 
 function hasStats(d) { return d && (d.shots || d.faceoffs || (d.goalies && d.goalies.length)); }

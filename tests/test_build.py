@@ -205,3 +205,138 @@ class MatchRecap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def seq(*teams: str, period: str = "2") -> list[dict]:
+    """Голы по порядку: "h" — хозяева, "a" — гости, "b" — победный буллит хозяев."""
+    out, h, a = [], 0, 0
+    for i, t in enumerate(teams):
+        side = "home" if t in ("h", "b") else "away"
+        h, a = (h + 1, a) if side == "home" else (h, a + 1)
+        out.append({"period": "РБ" if t == "b" else period, "time": f"{21 + i}:00", "team": side,
+                    "score": f"{h}:{a}", "strength": "", "author": f"Игрок {i}", "assists": []})
+    return out
+
+
+def scored(goals: list[dict], decision: str = "") -> dict:
+    h = sum(x["team"] == "home" for x in goals)
+    return {"home": "ryazan-vdv", "away": "belgorod", "goals": goals,
+            "score": {"home": h, "away": len(goals) - h, "decision": decision}}
+
+
+class WinningGoal(unittest.TestCase):
+    """Краш-тест победной шайбы (ADR-008). Правило лиги: гол победителя, после которого
+    соперник уже не сравнял счёт, — номер (голы проигравшего + 1) у победителя."""
+
+    def gw(self, goals, decision=""):
+        i = b.winning_goal(scored(goals, decision))
+        return None if i is None else goals[i]["score"]
+
+    def test_not_the_last_goal(self):
+        # скриншот владельца: 5:2, победная — 3:1, как в протоколе лиги (ШП у Колыхалова)
+        self.assertEqual(self.gw(seq("h", "a", "h", "h", "h", "h", "a")), "3:1")
+
+    def test_single_goal(self):
+        self.assertEqual(self.gw(seq("h")), "1:0")
+
+    def test_shutout_is_first_goal(self):
+        self.assertEqual(self.gw(seq("a", "a", "a")), "0:1")
+
+    def test_comeback_is_last_goal(self):
+        self.assertEqual(self.gw(seq("a", "a", "h", "h", "h")), "3:2")
+
+    def test_lead_blown_then_retaken(self):
+        # 2:0 → 2:2 → 3:2: победная — третья, ведь после 2:0 соперник сравнял
+        self.assertEqual(self.gw(seq("h", "h", "a", "a", "h")), "3:2")
+
+    def test_away_winner(self):
+        self.assertEqual(self.gw(seq("h", "a", "a", "h", "a")), "2:3")
+
+    def test_overtime_goal(self):
+        goals = seq("h", "a", "a", "h")
+        goals.append({**seq("h", "a", "a", "h", "a")[-1], "period": "ОТ", "time": "62:10"})
+        self.assertEqual(self.gw(goals, "ОТ"), "2:3")
+
+    def test_shootout_is_the_shootout_goal(self):
+        goals = seq("h", "a", "b")
+        i = b.winning_goal(scored(goals, "Б"))
+        self.assertEqual(goals[i]["period"], "РБ")
+
+    def test_no_goals_in_protocol(self):
+        self.assertIsNone(b.winning_goal({"score": {"home": 2, "away": 1, "decision": ""}, "goals": []}))
+
+    def test_draw_has_none(self):
+        self.assertIsNone(self.gw(seq("h", "a")))
+
+    def test_goals_do_not_add_up_to_score(self):
+        # 21/22, «Полёт» — «Дизелист»: в протоколе итог 2:3, а голов 1:3 — ничего не выдумываем
+        g = scored(seq("h", "a", "a", "a"))
+        g["score"]["home"] = 2
+        self.assertIsNone(b.winning_goal(g))
+        self.assertEqual(b.story(g, NAMES), "")
+
+    def test_broken_score_column(self):
+        goals = seq("h", "h", "a")
+        goals[1]["score"] = "1:1"
+        self.assertIsNone(b.winning_goal(scored(goals)))
+
+    def test_official_wins_over_rule(self):
+        goals = seq("h", "a", "h", "h")
+        self.assertEqual(b.winning_goal(scored(goals), official=3), 3)
+        self.assertEqual(b.winning_goal(scored(goals), official=1), 2)   # гол проигравших — не принимаем
+
+    def test_official_from_protocol_fixture(self):
+        import league
+        for name, gid, want in (("protocol_900942_regular.html", 900942, "2:1"),
+                                ("protocol_901016_ot.html", 901016, "5:6")):
+            p = json.loads(json.dumps(league.parse_protocol((FIX / name).read_text(encoding="utf-8"), gid).to_json()))
+            i = b.official_winning_goal(p)
+            self.assertIsNotNone(i, name)
+            self.assertEqual(p["goals"][i]["score"], want)
+
+    def test_story_without_double_dot(self):
+        goals = seq("h", "a", "b")
+        goals[-1]["author"] = "Царёв Иван А."
+        self.assertEqual(b.story(scored(goals, "Б"), NAMES), "Всё решили буллиты, победный забил Царёв Иван А.")
+
+    def test_comeback_grammar(self):
+        self.assertTrue(b.story(scored(seq("a", "a", "h", "h", "h")), NAMES)
+                        .startswith("Камбэк «Рязань-ВДВ»: уступали 0:2 и вырвали победу. "))
+
+    def test_slow_three_is_not_a_story(self):
+        goals = seq("h", "h", "h")                         # 21:00, 22:00, 23:00 — за две минуты
+        self.assertIn("Три шайбы подряд", b.story(scored(goals), NAMES))
+        goals[2]["time"] = "39:00"                          # растянулись на 18 минут
+        self.assertNotIn("подряд", b.story(scored(goals), NAMES))
+
+    def test_every_past_story_reads_well(self):
+        teams = {t["id"]: t["name"] for t in b.load_teams().all}
+        hist = {str(x["game_id"]): x for x in b.load_history() if x.get("game_id")}
+        for k, p in b.load_history_protocols().items():
+            g = {"id": k, "home": hist[k]["home"], "away": hist[k]["away"]}
+            b.fill_result(g, p)
+            st = b.match_detail(g, p, teams)["story"]
+            self.assertNotIn("..", st, k)
+            self.assertNotIn(", и ", st, k)
+            self.assertTrue(not st or st.endswith("."), k)
+
+    def test_every_past_protocol(self):
+        # на всех скачанных протоколах: победная — гол победителя, дальше проигравший не сравнивает
+        for k, p in b.load_history_protocols().items():
+            g = {"score": {"home": p["home_score"], "away": p["away_score"], "decision": p["decision"]},
+                 "goals": [{**x, "author": x["author"]["name"]} for x in p["goals"]]}
+            i = b.winning_goal(g)
+            if i is None:
+                self.assertFalse(b.goals_consistent(g), k)
+                continue
+            win = "home" if p["home_score"] > p["away_score"] else "away"
+            self.assertEqual(g["goals"][i]["team"], win, k)
+            h, a = map(int, g["goals"][i]["score"].split(":"))
+            mine, theirs = (h, a) if win == "home" else (a, h)
+            lose_final = min(p["home_score"], p["away_score"])
+            self.assertEqual(mine, lose_final + 1, k)
+            self.assertLessEqual(theirs, lose_final, k)
+
+
+if __name__ == "__main__":
+    unittest.main()

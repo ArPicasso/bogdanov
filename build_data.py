@@ -158,18 +158,44 @@ def secs(t: str) -> int:
 
 NUM = {3: "три", 4: "четыре", 5: "пять", 6: "шесть", 7: "семь", 8: "восемь", 9: "девять", 10: "десять"}
 PERIOD_GEN = {"1": "первого", "2": "второго", "3": "третьего"}
-PP_MINUTES = {2, 4, 5}   # после этих удалений соперник играет в большинстве
+PP_MINUTES = {2, 4, 5}
+BURST_MIN_3 = 5 * 60     # три шайбы подряд — сюжет, только если уложились в пять минут   # после этих удалений соперник играет в большинстве
 
 
-def winning_goal(g: dict) -> int | None:
-    """Номер победной шайбы в списке голов: гол победителя, после которого соперник уже не догнал."""
+def goals_consistent(g: dict) -> bool:
+    """Голы протокола сходятся со счётом: счёт после каждого гола растёт на единицу у забившей
+    стороны и приходит к итоговому. Бывает, что лига ошибается в протоколе, — тогда не выводим
+    из голов ничего (ни победной шайбы, ни сюжета)."""
     s = g.get("score")
-    if not s or s["home"] == s["away"]:
+    goals = g.get("goals") or []
+    if not s or not goals:
+        return False
+    h = a = 0
+    for x in goals:
+        if x["team"] == "home":
+            h += 1
+        else:
+            a += 1
+        if x.get("score") != f"{h}:{a}":
+            return False
+    return (h, a) == (s["home"], s["away"])
+
+
+def winning_goal(g: dict, official: int | None = None) -> int | None:
+    """Номер победной шайбы в списке голов — правило лиги: гол победителя, после которого
+    соперник уже не сравнял счёт. При 5:2 это третья шайба победителя (3:1), а не последняя.
+
+    official — номер гола из колонки «ШП» протокола, если лига её заполнила: он главнее расчёта."""
+    s = g.get("score")
+    if not s or s["home"] == s["away"] or not goals_consistent(g):
         return None
     win = "home" if s["home"] > s["away"] else "away"
+    goals = g["goals"]
+    if official is not None and 0 <= official < len(goals) and goals[official]["team"] == win:
+        return official
     need = min(s["home"], s["away"]) + 1
     count = 0
-    for i, x in enumerate(g.get("goals", [])):
+    for i, x in enumerate(goals):
         if x["team"] == win:
             count += 1
             if count == need:
@@ -177,8 +203,29 @@ def winning_goal(g: dict) -> int | None:
     return None
 
 
+def official_winning_goal(p: dict) -> int | None:
+    """Номер гола, автору которого лига записала «ШП», если такой гол один."""
+    if p["home_score"] == p["away_score"]:
+        return None
+    win = "home" if p["home_score"] > p["away_score"] else "away"
+    scorers = [k["player"] for k in p.get("lineups", []) if k.get("gwg") and k["team"] == win]
+    if len(scorers) != 1:
+        return None
+    who = scorers[0]
+    hits = [i for i, x in enumerate(p["goals"]) if x["team"] == win and (
+        (who.get("id") and x["author"].get("id") == who["id"])
+        or (not who.get("id") and x["author"].get("number") == who.get("number")))]
+    if len(hits) == 1:
+        return hits[0]
+    # автор забил несколько раз: победная — та, после которой соперник не сравнял
+    computed = winning_goal({"score": {"home": p["home_score"], "away": p["away_score"]},
+                             "goals": p["goals"]})
+    return computed if computed in hits else None
+
+
 def _burst(goals: list[dict]) -> tuple[int, int] | None:
-    """Самая длинная серия шайб одной команды без ответа внутри одного периода (от трёх)."""
+    """Самая длинная серия шайб одной команды без ответа внутри одного периода: от четырёх,
+    а три — только если уложились в пять минут. Три подряд за период — обычное дело, не сюжет."""
     best = None
     i = 0
     while i < len(goals):
@@ -186,7 +233,9 @@ def _burst(goals: list[dict]) -> tuple[int, int] | None:
         while (j + 1 < len(goals) and goals[j + 1]["team"] == goals[i]["team"]
                and goals[j + 1]["period"] == goals[i]["period"]):
             j += 1
-        if j - i + 1 >= 3 and (best is None or j - i > best[1] - best[0]):
+        n = j - i + 1
+        quick = secs(goals[j]["time"]) - secs(goals[i]["time"]) <= BURST_MIN_3
+        if (n >= 4 or (n == 3 and quick)) and (best is None or n > best[1] - best[0] + 1):
             best = (i, j)
         i = j + 1
     return best
@@ -200,11 +249,16 @@ def plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
-def story(g: dict, teams: dict[str, str], goalies: list[dict] = ()) -> str:
+def _sentence(text: str) -> str:
+    """Точка в конце, но не вторая: имена в протоколе бывают с сокращением — «Царёв Иван А.»."""
+    return text if text.endswith(".") else text + "."
+
+
+def story(g: dict, teams: dict[str, str], goalies: list[dict] = (), gw: int | None = None) -> str:
     """Сюжет матча одной-двумя фразами. Только факты протокола, без оценок. Нечего сказать — пусто."""
     s = g.get("score")
     goals = [x for x in g.get("goals", []) if x["period"] != "РБ"]
-    if not s or s["home"] == s["away"]:
+    if not s or s["home"] == s["away"] or not goals_consistent(g):
         return ""
     win = "home" if s["home"] > s["away"] else "away"
     lose = "away" if win == "home" else "home"
@@ -220,16 +274,16 @@ def story(g: dict, teams: dict[str, str], goalies: list[dict] = ()) -> str:
     if worst <= -2:
         h, a = worst_score.split(":")
         mine, theirs = (h, a) if win == "home" else (a, h)
-        end = "но отыгрались" if s["decision"] else "и вырвали победу"
-        out.append(f"Камбэк {name[win]}: уступали {mine}:{theirs}, {end}.")
+        end = ", но отыгрались" if s["decision"] else " и вырвали победу"
+        out.append(f"Камбэк {name[win]}: уступали {mine}:{theirs}{end}.")
 
     if s["decision"] == "Б":
         so = [x for x in g.get("goals", []) if x["period"] == "РБ"]
         who = so[-1]["author"] if so and so[-1]["author"] != HIDDEN_NAME else ""
-        out.append(f"Всё решили буллиты, победный забил {who}." if who else "Всё решили буллиты.")
+        out.append(_sentence(f"Всё решили буллиты, победный забил {who}") if who else "Всё решили буллиты.")
     elif s["decision"] == "ОТ" and goals and goals[-1]["period"] == "ОТ":
         who = goals[-1]["author"]
-        out.append(f"В овертайме победу принёс {who}." if who != HIDDEN_NAME else "Победу принёс овертайм.")
+        out.append(_sentence(f"В овертайме победу принёс {who}") if who != HIDDEN_NAME else "Победу принёс овертайм.")
 
     burst = _burst(goals)
     if burst and len(out) < 2:
@@ -254,12 +308,13 @@ def story(g: dict, teams: dict[str, str], goalies: list[dict] = ()) -> str:
             out.append(f"Сухой матч: {k['name']} отразил все {k['shots']} "
                        f"{plural(k['shots'], 'бросок', 'броска', 'бросков')}.")
 
-    gw = winning_goal(g)
+    if gw is None:
+        gw = winning_goal(g)
     if len(out) < 2 and not s["decision"] and gw is not None:
         x = g["goals"][gw]
         left = 60 * 60 - secs(x["time"])
         if 0 < left <= 180 and x["author"] != HIDDEN_NAME:
-            out.append(f"Победная шайба за {left // 60}:{left % 60:02d} до сирены: {x['author']}.")
+            out.append(_sentence(f"Победная шайба за {left // 60}:{left % 60:02d} до сирены: {x['author']}"))
     return " ".join(out[:2])
 
 
@@ -298,10 +353,11 @@ def match_detail(g: dict, p: dict, teams: dict[str, str], hidden: set[int] = fro
         rosters[k["team"]][k["role"]].append(row)
     length = 65 if p.get("decision") else 60
     last = max((secs(x["time"]) for x in p["goals"] if x["period"] != "РБ"), default=0)
+    gw = winning_goal(g, official_winning_goal(p))
     return {
         "id": g["id"],
-        "story": story(g, teams, goalies),
-        "gw": winning_goal(g),
+        "story": story(g, teams, goalies, gw),
+        "gw": gw,
         "length": max(length, -(-last // 60)),
         "penalties": [{"time": x["time"], "team": x["team"],
                        "no": x["player"]["number"] if x["player"] and x["player"].get("id") not in hidden else None,

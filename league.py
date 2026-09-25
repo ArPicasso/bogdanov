@@ -137,6 +137,7 @@ class Skater:
     pim: int = 0
     faceoffs: int = 0
     faceoffs_won: int = 0
+    gwg: int = 0             # «ШП» — победная шайба по версии лиги
     shots_against: int = 0   # у вратарей
     saves: int = 0
     toi: str = ""            # время на льду, у вратарей
@@ -275,7 +276,8 @@ def _lineups(block: Node) -> tuple[Skater, ...]:
                     out.append(Skater(team, role, player, cap.group(1) if cap else "",
                                       played=_int(v.get("И", "")) > 0, goals=_int(v.get("Ш", "")),
                                       assists=_int(v.get("А", "")), pim=_int(v.get("Штр", "")),
-                                      faceoffs=_int(v.get("Вбр", "")), faceoffs_won=_int(v.get("ВВбр", ""))))
+                                      faceoffs=_int(v.get("Вбр", "")), faceoffs_won=_int(v.get("ВВбр", "")),
+                                      gwg=_int(v.get("ШП", ""))))
     return tuple(out)
 
 
