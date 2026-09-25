@@ -60,14 +60,16 @@ const nextFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));   // �
 
 // Бегунок — заливка выбранного в меню, сегментах и чипах. Он из трёх частей (полукруг, середина,
 // полукруг) и двигается только transform: анимацию ведёт видеокарта, и она идёт ровно, даже пока
-// основной поток перерисовывает экран. Ширина — масштабом середины, полукруги не искажаются
+// основной поток перерисовывает экран. Ширина — масштабом середины, полукруги не искажаются.
+// Середина во всю ширину группы и только сжимается: узкую, растянутую в сотню раз, телефон
+// на ходу не успевает нарисовать, и посреди бегунка появляется дыра
 const RUN = '<i class="run" aria-hidden="true"><i class="l"></i><i class="m"></i><i class="r"></i></i>';
 const runs = new WeakMap();   // бегунок → { from, to, anims }: чтобы подхватить его на лету
 
-function runPose(r, cap) {
+function runPose(r, cap, span) {
   return [
     `translateX(${r.x}px)`,
-    `translateX(${r.x + cap - 0.5}px) scaleX(${Math.max(1, r.w - 2 * cap + 1)})`,
+    `translateX(${r.x + cap - 0.5}px) scaleX(${Math.max(1, r.w - 2 * cap + 1) / span})`,
     `translateX(${r.x + r.w - cap}px)`,
   ];
 }
@@ -86,11 +88,12 @@ function moveRun(run, to, animate, duration = 260) {
   const st = runs.get(run);
   if (st && st.anims) st.anims.forEach((a) => a.cancel());
   const parts = [...run.children];
-  const end = runPose(to, cap);
+  const span = parts[1].offsetWidth || 1;
+  const end = runPose(to, cap, span);
   parts.forEach((el, i) => { el.style.transform = end[i]; });
   const rec = { from, to, anims: null };
   if (animate && from && !calm() && (Math.abs(from.x - to.x) > 0.5 || Math.abs(from.w - to.w) > 0.5)) {
-    const begin = runPose(from, cap);
+    const begin = runPose(from, cap, span);
     rec.anims = parts.map((el, i) => el.animate([{ transform: begin[i] }, { transform: end[i] }], { duration, easing: EASE_OUT }));
   }
   runs.set(run, rec);
