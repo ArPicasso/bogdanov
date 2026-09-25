@@ -182,6 +182,21 @@ class MatchRecap(unittest.TestCase):
         self.assertNotIn("Щербаков Артём Ан.", names)
         self.assertNotIn("44596", json.dumps(d))
 
+    def test_sticker_numbers_in_goals_and_penalties(self):
+        """Номер автора гола и игрока удаления — для стикера в форме команды (ADR-009)."""
+        g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
+        self.assertEqual((g["goals"][0]["author"], g["goals"][0]["no"]), ("Щербаков Артём Ан.", 23))
+        self.assertTrue(all("no" in x for x in g["goals"]))
+        self.assertFalse(any(x.get("gk") for x in g["goals"]))      # вратари в этом матче не забивали
+        g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod", {44596})
+        self.assertNotIn("no", g["goals"][0])                       # скрытому — ни номера, ни стикера с номером
+
+    def test_goalie_flag_by_lineup(self):
+        p = {"lineups": [{"team": "home", "role": "G", "player": {"number": 30, "name": "В", "id": 1}}]}
+        self.assertEqual(b.sticker({"number": 30, "id": 1}, "home", b.goalies_of(p), set()), {"no": 30, "gk": 1})
+        self.assertEqual(b.sticker({"number": 30, "id": 1}, "away", b.goalies_of(p), set()), {"no": 30})
+        self.assertEqual(b.sticker(None, "home", set(), set()), {})
+
     def test_no_player_ids_in_app_data(self):
         g, d = self.detail("protocol_900942_regular.html", 900942, "ryazan-vdv", "belgorod")
         self.assertNotIn('"id": 4', json.dumps(g["goals"]))

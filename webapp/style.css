@@ -689,7 +689,11 @@ h1, .display {
 .goals { border: var(--line); border-radius: 20px; }
 .period { padding: 10px 12px 4px; }
 .period .tag { height: 22px; font-size: 10px; background: var(--away-bg); color: var(--away-fg); border-color: var(--away-edge); }
-.goal { display: grid; grid-template-columns: 42px 24px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; }
+.goal { display: grid; grid-template-columns: 42px 36px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; }
+.goal .tm { padding-top: 8px; }
+.goal .sc { padding-top: 8px; }
+/* командный штраф: игрока нет — эмблема 24px по центру места под стикер */
+.ps.team { display: grid; place-items: center; }
 .goal .tm { font-weight: 700; font-size: 13px; line-height: 1.5; }
 .goal .who { min-width: 0; font-weight: 700; }
 .goal .who .as { font-weight: 500; font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -727,7 +731,7 @@ h1, .display {
 .flow .fl-dot.pp .v { fill: var(--ink); }
 .flow .fl-dot.on .v { stroke-width: 2.5; }
 .flow .fl-dot:focus-visible .v { stroke: var(--blue); stroke-width: 2.5; }
-.flow-cap { display: grid; grid-template-columns: 44px 24px 1fr auto; gap: 10px; align-items: center; min-height: 46px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--mist); }
+.flow-cap { display: grid; grid-template-columns: 44px 36px 1fr auto; gap: 10px; align-items: center; min-height: 46px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--mist); }
 .flow-cap .tm { font-weight: 700; font-size: 13px; }
 .flow-cap .who { min-width: 0; font-weight: 700; }
 .flow-cap .who small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
@@ -763,7 +767,7 @@ h1, .display {
 .cmp-bar i.w { background: var(--act); border-color: var(--act); }
 
 .gk { border: var(--line); border-radius: 20px; }
-.gk-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; }
+.gk-row { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 10px 14px; }
 .gk-row + .gk-row { border-top: 1px solid var(--mist); }
 .gk-row .nm { min-width: 0; font-weight: 700; }
 .gk-row .nm small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }

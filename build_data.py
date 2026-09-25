@@ -97,6 +97,21 @@ def shown(player: dict | None, hidden: set[int] = frozenset()) -> str:
     return HIDDEN_NAME if player.get("id") in hidden else player["name"]
 
 
+def goalies_of(p: dict) -> set[tuple[str, int]]:
+    """(команда, номер) вратарей матча — стикер вратаря у гола и удаления (ADR-009)."""
+    return {(k["team"], k["player"]["number"]) for k in p.get("lineups", []) if k["role"] == "G"}
+
+
+def sticker(player: dict | None, team: str, goalies: set[tuple[str, int]], hidden: set[int]) -> dict:
+    """Номер для стикера игрока и пометка вратаря. Скрытому игроку номер не показываем."""
+    if not player or player.get("id") in hidden or player.get("number") is None:
+        return {}
+    out = {"no": player["number"]}
+    if (team, player["number"]) in goalies:
+        out["gk"] = 1
+    return out
+
+
 def fill_result(g: dict, p: dict, hidden: set[int] = frozenset()) -> None:
     """Счёт, голы и сведения из протокола — в матч, как их ждёт мини-апп."""
     g["n"] = g.get("n") or p.get("n")
@@ -104,9 +119,11 @@ def fill_result(g: dict, p: dict, hidden: set[int] = frozenset()) -> None:
     g["attendance"] = p.get("attendance")
     g["score"] = {"home": p["home_score"], "away": p["away_score"], "decision": p["decision"],
                   "periods": p["periods"]}
+    gk = goalies_of(p)
     g["goals"] = [{"period": x["period"], "time": x["time"], "team": x["team"], "score": x["score"],
                    "strength": x["strength"], "author": shown(x["author"], hidden),
-                   "assists": [shown(a, hidden) for a in x["assists"]]} for x in p["goals"]]
+                   "assists": [shown(a, hidden) for a in x["assists"]],
+                   **sticker(x["author"], x["team"], gk, hidden)} for x in p["goals"]]
 
 
 def attach_results(games: list[dict], teams: Teams, results: league.Results,
@@ -364,7 +381,9 @@ def match_detail(g: dict, p: dict, teams: dict[str, str], hidden: set[int] = fro
         "penalties": [{"time": x["time"], "team": x["team"],
                        "no": x["player"]["number"] if x["player"] and x["player"].get("id") not in hidden else None,
                        "who": shown(x["player"], hidden) or "Командный штраф",
-                       "min": x["minutes"], "why": x["reason"]} for x in p.get("penalties", [])],
+                       "min": x["minutes"], "why": x["reason"],
+                       **({"gk": 1} if sticker(x["player"], x["team"], goalies_of(p), hidden).get("gk") else {})}
+                      for x in p.get("penalties", [])],
         "shots": shots if any(shots.values()) else None,
         "faceoffs": fo if any(fo.values()) else None,
         "pim": pim,
