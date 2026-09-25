@@ -623,7 +623,7 @@ function renderTable() {
 }
 
 // Шапка «Таблицы»: «Команды · Игроки», под ними конференции или показатели (ADR-009).
-// Ряд пилюль один в обоих видах — высота шапки не прыгает
+// Пилюли — во всю ширину: конференции в один ряд, шесть показателей — сеткой 3×2, все на виду
 function tableFilters() {
   const players = state.tableView === "players";
   const pills = players
@@ -633,16 +633,7 @@ function tableFilters() {
       ${segBtn(!players, 'data-table-view="teams"', "<span>Команды</span>")}
       ${segBtn(players, 'data-table-view="players"', "<span>Игроки</span>")}
     </div>
-    <div class="pills" role="group" aria-label="${players ? "Показатель" : "Конференция"}">${pills.join("")}</div>`;
-}
-
-// Выбранная пилюля показателя не должна прятаться за краем ряда. Прокручиваем только ряд, не страницу
-function pillInView(root) {
-  const on = root.querySelector(".pills .on");
-  if (!on) return;
-  const row = on.parentNode;
-  if (on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = on.offsetLeft + on.offsetWidth - row.clientWidth + 16;
-  else if (on.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, on.offsetLeft - 16);
+    <div class="pills fill" style="--n:${players ? 3 : 2}" role="group" aria-label="${players ? "Показатель" : "Конференция"}">${pills.join("")}</div>`;
 }
 
 // «Команды · Игроки»: бегунок перетекает сразу, список — в следующем кадре
@@ -652,7 +643,6 @@ function refreshTable() {
   const prev = runnerState(bar);
   bar.innerHTML = tableFilters();
   placeRunners(bar, prev);
-  pillInView(bar);
   nextFrame(() => {
     const box = $("#table-body");
     if (!box || state.tab !== "table") return;
@@ -1479,7 +1469,6 @@ function render(dir = 0) {
     window.scrollTo(0, 0);
   }
   if (state.tab === "home") countUp(screen);
-  if (state.tab === "table") pillInView(screen);
   if (dir && !calm()) {
     // двигаем детей, а не сам экран: его край обрезает сдвиг (#screen в style.css)
     for (const el of screen.children) {
@@ -1643,7 +1632,6 @@ document.addEventListener("click", (e) => {
       b.classList.toggle("on", b === el);
       b.setAttribute("aria-pressed", b === el);
     });
-    pillInView(el.parentNode);
     $("#table-body").innerHTML = leadersBody();
     return fadeIn($("#table-body"));
   }

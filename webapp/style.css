@@ -470,6 +470,13 @@ h1, .display {
 /* Лидеры лиги (ADR-009): те же строки таблицы, вместо команды — игрок и его клуб */
 .table-seg { margin-top: 16px; }
 .table-seg + .pills { margin-top: 8px; }
+/* Пилюли во всю ширину равными долями: ничего не прячется за краем */
+.pills.fill { display: grid; grid-template-columns: repeat(var(--n), 1fr); overflow: visible; }
+.pills.fill button { min-width: 0; padding: 10px 6px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 359px) {
+  .pills.fill { gap: 4px; }
+  .pills.fill button { padding: 10px 2px; font-size: 11.5px; letter-spacing: 0; }
+}
 .lead-row { display: flex; cursor: default; }
 .lead-row > span { flex: none; width: 36px; }
 .lead-row > .pos { width: 24px; }
