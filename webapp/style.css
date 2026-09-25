@@ -85,7 +85,7 @@ button { font: inherit; color: inherit; letter-spacing: inherit; }
 /* Ровные цифры только у чисел: иначе дефис в «Рязань-ВДВ» становится шире */
 .num, .score, .stat b, .date b, .gl, .st-row .n, .goal .tm, .goal .sc { font-feature-settings: "tnum"; }
 
-main { max-width: 560px; margin: 0 auto; padding: 0 16px 120px; }
+main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(120px + env(safe-area-inset-bottom)); }
 
 /* ---------- бегущая строка ---------- */
 
@@ -124,7 +124,7 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px 120px; }
 .band.concrete { background: var(--band-concrete); }
 
 h1, .display {
-  font: 800 30px/0.95 var(--display);
+  font: 800 28px/0.95 var(--display);
   letter-spacing: -0.01em;
   margin: 0;
   overflow-wrap: break-word;
@@ -151,10 +151,11 @@ h1, .display {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  border: var(--line);
+  border: 1px solid var(--mist);   /* мини-эмблема в строке — без чёрного колечка (DESIGN.md) */
   background: var(--emblem-bg);
   overflow: hidden;
 }
+.em.md, .em.lg, .em.xl { border: var(--line); }
 .em img { width: 78%; height: 78%; object-fit: contain; display: block; }
 .em.ab { background: var(--violet); color: var(--sticker); font: 700 8px/1 var(--ui); letter-spacing: .02em; }
 .em.md { width: 44px; height: 44px; }
@@ -251,67 +252,146 @@ h1, .display {
 .list { border: var(--line); border-radius: 20px; overflow: hidden; background: var(--paper); }
 .row {
   display: grid;
-  grid-template-columns: 50px 1fr auto;
+  grid-template-columns: 48px 1fr auto;
   gap: 10px;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   cursor: pointer;
 }
+.row.two { grid-template-columns: 1fr auto; }
 .row + .row { border-top: 1px solid var(--mist); }
 .row:active { background: var(--sel); }
+/* Дата без рамки: рамка только у ближайшего матча */
 .date {
   display: grid;
   place-items: center;
   align-content: center;
-  width: 50px;
-  height: 54px;
-  border: var(--line);
-  border-radius: 16px;
-  background: var(--paper);
+  width: 48px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 14px;
 }
 .date b { font: 800 18px/1 var(--display); }
-.date span { margin-top: 4px; font: 700 10px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase; }
-.row.next .date { background: var(--home-bg); color: var(--home-fg); border-color: var(--home-edge); }
-.row.past .date { background: var(--mist); border-color: var(--mist); }
-.row .t { display: grid; gap: 7px; min-width: 0; }
+.date span { margin-top: 4px; white-space: nowrap; font: 700 10px/1 var(--ui); letter-spacing: .04em; text-transform: uppercase; }
+.row.next .date { border-color: var(--edge-strong); background: var(--paper); }
+.row.past .date { color: var(--muted); }
+.row .t { display: grid; gap: 6px; min-width: 0; }
 .row .t div { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .row .t .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .t .nm.me { font-weight: 700; }
+.row.one .t { gap: 4px; }
+.row.one .t .nm { font: 700 16px/1.2 var(--ui); }
+.row .t .sub { gap: 6px; padding-left: 32px; font-size: 12px; color: var(--muted); }
+.row .t .sub .city { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.where {
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  font: 700 10px/16px var(--ui);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.where.home { background: var(--home-bg); color: var(--home-fg); }
+.where.away { background: var(--away-bg); color: var(--away-fg); }
 .row .t .gl { margin-left: auto; padding-left: 8px; font-weight: 500; color: var(--muted); }
 .row .t .gl.lead { color: var(--ink); font-weight: 700; }
-.row .r { display: flex; justify-content: flex-end; min-width: 30px; }
+.row .r { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 30px; }
 .row .r .kick { font-weight: 700; font-size: 13px; }
+.row .r .sc { font-weight: 700; }
+/* Подзаголовок дня во «Вся лига» */
+.day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 2px;
+  font: 700 12px/1.2 var(--ui);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.row + .day { border-top: 1px solid var(--mist); }
+.day.next span:first-child { padding: 3px 9px; margin-left: -9px; border: 1px solid var(--edge-strong); border-radius: 9999px; color: var(--ink); }
+.day .tag { height: 22px; font-size: 10px; }
 
 /* ---------- фильтры ---------- */
 
 .pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-top: 16px; }
 .pills::-webkit-scrollbar { display: none; }
 .pills + .pills { margin-top: 8px; }
-.pills button, .pills select {
+.pills button {
   flex: none;
+  min-height: 40px;
   border: var(--line);
   border-radius: 9999px;
-  padding: 10px 15px;
+  padding: 10px 16px;
   background: var(--paper);
   font: 700 13px/1.2 var(--ui);
-  letter-spacing: .02em;
+  letter-spacing: .03em;
   cursor: pointer;
   white-space: nowrap;
 }
 .pills .on { background: var(--act); color: var(--on-act); border-color: var(--act); }
-.pills select {
-  appearance: none;
-  max-width: 52vw;
-  text-overflow: ellipsis;
-  padding-right: 30px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 11px center;
-  background-size: 12px;
+
+/* Полоса календаря: заголовок уезжает, фильтры прилипают под бегущей строкой (DESIGN.md) */
+.band.split { margin-bottom: 0; padding: 20px 16px 4px; min-height: 60px; border-bottom: 0; }
+.band.split .theme-toggle { top: 12px; }
+.filterbar {
+  position: sticky;
+  top: var(--marquee-h);
+  z-index: 4;
+  margin: 0 -16px 4px;
+  padding: 8px 16px 8px;
+  background: var(--band-lavender);
+  border-bottom: var(--line);
 }
-:root[data-theme="dark"] .pills select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
-:root[data-theme="dark"] .pills select.on { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
-.pills select.on { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
+
+/* Сегменты: одна пилюля во всю ширину, свободное место делится поровну, длинное имя клуба — с многоточием */
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: var(--line);
+  border-radius: 9999px;
+  background: var(--paper);
+}
+.seg button {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9999px;
+  background: none;
+  font: 700 13px/1 var(--ui);
+  letter-spacing: .03em;
+  cursor: pointer;
+}
+.seg button:not(:last-child) { flex-shrink: 0; }   /* сжимается только имя клуба в «Другой» */
+.seg button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg .chev { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.seg .on { background: var(--act); color: var(--on-act); }
+
+/* Вторичный фильтр: без контура и заливки, активный — белая пилюля. Зона нажатия 40px */
+.chips { display: flex; gap: 4px; margin-top: 4px; }
+.chips button {
+  position: relative;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: none;
+  font: 700 13px/1 var(--ui);
+  letter-spacing: .03em;
+  cursor: pointer;
+}
+.chips button::after { content: ""; position: absolute; inset: -4px 0; }
+.chips .on { background: var(--paper); border-color: var(--edge); }
 
 /* ---------- таблица ---------- */
 
@@ -434,13 +514,13 @@ h1, .display {
   border-radius: 9999px;
   background: none;
   font: 700 13px/1 var(--ui);
-  letter-spacing: .02em;
+  letter-spacing: .03em;
   cursor: pointer;
   transition: flex-grow .2s;
 }
 .tabs button span { display: none; }
 .tabs svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.tabs button.active { flex: 2.4; background: var(--act); color: var(--on-act); }
+.tabs button.active { flex: 1.8; background: var(--act); color: var(--on-act); }
 .tabs button.active span { display: inline; }
 
 /* ---------- карточка матча ---------- */
@@ -505,8 +585,8 @@ h1, .display {
 :root[data-theme="dark"] .ribbon .f { stroke: #3f8fe6; }
 /* Сплошной синий — только активная вкладка и главная кнопка. Победы и выбранные фильтры — тоном */
 :root[data-theme="dark"] .res.w,
-:root[data-theme="dark"] .pills .on { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
-:root[data-theme="dark"] .pills select.on { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%239ccbff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E"); }
+:root[data-theme="dark"] .pills .on,
+:root[data-theme="dark"] .seg .on { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
 :root[data-theme="dark"] { --emblem-bg: #dde1e8; }
 
 /* ---------- переключатель темы ---------- */
@@ -568,7 +648,7 @@ h1, .display {
 }
 
 /* Имя в шапке: кегль по самому длинному слову, 84px — поля полосы и кнопка темы */
-h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) * 0.9)), 30px); }
+h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) * 0.9)), 28px); }
 
 .hero-em { flex: none; padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
 .hero-em:active .em { transform: rotate(-6deg) scale(.94); }
