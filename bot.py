@@ -213,17 +213,33 @@ def save_subs(subs: set[int]) -> None:
 SUBS = load_subs()
 
 
+def turn_on(chat_id: int) -> None:
+    if chat_id not in SUBS:
+        SUBS.add(chat_id)
+        save_subs(SUBS)
+
+
 def remind_kb(chat_id: int) -> InlineKeyboardMarkup:
     on = chat_id in SUBS
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
         text="🔕 Выключить" if on else "🔔 Включить", callback_data="r:toggle")]])
 
 
-def remind_text(chat_id: int) -> str:
-    state = "✅ включены" if chat_id in SUBS else "❌ выключены"
-    return (f"{e('bell')} Напоминания о матчах «{REMIND_TEAM}» {state}\n\n"
+def next_game(today: date) -> Game | None:
+    return next((g for g in GAMES if g.d >= today), None)
+
+
+def remind_text(chat_id: int, today: date | None = None) -> str:
+    """Состояние напоминаний. Включены — и ближайшая игра, чтобы было видно, о чём напомню."""
+    on = chat_id in SUBS
+    text = (f"{e('bell')} Напоминания о матчах «{REMIND_TEAM}» {'✅ включены' if on else '❌ выключены'}\n\n"
             f"Пришлю сообщение накануне игры в {REMIND_TOMORROW_AT:%H:%M} "
             f"и в день игры в {REMIND_TODAY_AT:%H:%M} (МСК).")
+    g = next_game(today or datetime.now(TZ).date()) if on else None
+    if g:
+        where = "дома" if g.home else "в гостях"
+        text += f"\n\nБлижайшая: {DOW[g.d.weekday()]} {g.d:%d.%m}, {where} с «{html.escape(g.opponent)}»"
+    return text
 
 
 def reminder_text(g: Game, kind: str) -> str:
@@ -290,13 +306,16 @@ async def safe_edit(c: CallbackQuery, make) -> None:
 
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
-    # стикер заодно убирает клавиатуру, если она осталась от прошлой версии бота
-    if not await send_sticker(m.bot, m.chat.id, "hello", reply_markup=ReplyKeyboardRemove()):
-        await m.answer("🏒", reply_markup=ReplyKeyboardRemove())
     cid = m.chat.id
-    if command.args == "remind":   # из мини-аппа, экран «Я» (ADR-004)
+    # «Напомнить» в мини-аппе: человек уже решил — включаем сразу и без приветствия (ADR-004, ADR-005)
+    if command.args == "remind":
+        turn_on(cid)
+        await send_sticker(m.bot, cid, "bell", reply_markup=ReplyKeyboardRemove())
         await say(m.bot, cid, lambda: (remind_text(cid), remind_kb(cid)))
         return
+    # стикер заодно убирает клавиатуру, если она осталась от прошлой версии бота
+    if not await send_sticker(m.bot, cid, "hello", reply_markup=ReplyKeyboardRemove()):
+        await m.answer("🏒", reply_markup=ReplyKeyboardRemove())
     if command.args == "leaders":   # ссылка t.me/<бот>?start=leaders (ADR-009)
         await send_leaders(m)
         return

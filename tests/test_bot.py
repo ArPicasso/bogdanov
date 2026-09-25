@@ -1,4 +1,5 @@
 """Онбординг бота (ADR-005): тексты, кнопки и стикеры — без Telegram и без токена."""
+import asyncio
 import json
 import re
 import sys
@@ -158,6 +159,46 @@ class AfterMatch(unittest.TestCase):
 
     def test_reminder_times_unchanged(self):
         self.assertEqual((bot.REMIND_TODAY_AT, bot.REMIND_TOMORROW_AT), (time(10, 0), time(19, 0)))
+
+
+class RemindLink(unittest.TestCase):
+    """«Напомнить» в мини-аппе ведёт на /start remind: бот сразу включает и говорит, что включил."""
+
+    def run_start(self, args):
+        m = mock.Mock()
+        m.chat.id = 42
+        m.answer = mock.AsyncMock()
+        cmd = bot.CommandObject(prefix="/", command="start", args=args)
+        with mock.patch.object(bot, "SUBS", set()) as subs, mock.patch.object(bot, "save_subs") as save, \
+                mock.patch.object(bot, "send_sticker", mock.AsyncMock(return_value=True)) as sticker, \
+                mock.patch.object(bot, "say", mock.AsyncMock()) as say:
+            asyncio.run(bot.start(m, cmd))
+            text, kb = say.call_args.args[2]()
+        return subs, save, [c.args[2] for c in sticker.call_args_list], text, kb
+
+    def test_link_turns_reminders_on(self):
+        subs, save, stickers, text, kb = self.run_start("remind")
+        self.assertEqual(subs, {42})
+        save.assert_called_once()
+        self.assertEqual(stickers, ["bell"])   # «Напомню!», а не приветствие
+        self.assertIn("включены", text)
+        self.assertIn("Выключить", kb.inline_keyboard[0][0].text)
+
+    def test_plain_start_still_greets(self):
+        subs, save, stickers, text, _ = self.run_start(None)
+        self.assertEqual(subs, set())
+        save.assert_not_called()
+        self.assertEqual(stickers, ["hello"])
+        self.assertIn("Жми «Открыть РХЛ»", text)
+
+    def test_next_game_named_when_on(self):
+        with mock.patch.object(bot, "SUBS", {42}):
+            text = bot.remind_text(42, date(2026, 9, 25))
+        self.assertIn("Ближайшая: Сб 03.10, дома с «МХК Белгород»", text)
+        with mock.patch.object(bot, "SUBS", set()):
+            self.assertNotIn("Ближайшая", bot.remind_text(42, date(2026, 9, 25)))
+        with mock.patch.object(bot, "SUBS", {42}):   # сезон кончился — без строки
+            self.assertNotIn("Ближайшая", bot.remind_text(42, date(2027, 6, 1)))
 
 
 class Leaders(unittest.TestCase):

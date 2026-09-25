@@ -941,12 +941,15 @@ function greetGuide() {
   showTour("hello", `${esc(g.hi)} Теперь подсказки — от меня.`, `<button type="button" class="btn" data-tour="done">Привет!</button>`);
 }
 
-// Тур — три подсказки на живых экранах: карточка проводника по центру, вкладка меню подсвечена
+// Тур — три подсказки на живых экранах. Цель шага (aim) вырезана из затемнения, карточка проводника
+// встаёт рядом с ней. tap — нажатие по цели работает: открывается то, что она открывает, тур ждёт
 const TOUR = [
-  { tab: "home", text: "Здесь ближайший матч, последний счёт и место команды в таблице." },
-  { tab: "table", players: true, text: "А тут лучшие игроки лиги. Нажми на карточку — будет топ-10." },
-  { tab: "me", text: "Это твой паспорт болельщика. Выложи его в историю — пусть все знают, за кого болеешь." },
+  { tab: "home", aim: ".board-card[data-game], .stats", text: "Здесь ближайший матч, последний счёт и место команды в таблице." },
+  { tab: "table", players: true, aim: ".lead-card[data-lead-open]", tap: true, text: "А тут лучшие игроки лиги. Нажми на карточку — откроется топ-10." },
+  { tab: "me", aim: ".passport", text: "Это твой паспорт болельщика. Выложи его в историю — пусть все знают, за кого болеешь." },
 ];
+const AIM_WAIT_MS = 2000;   // дольше цель не ждём: карточка встаёт у меню, как без цели
+const AIM_SETTLE_MS = 260;  // новый экран въезжает 220 мс — меряем цель, когда он встал
 
 function startTour(hello) {
   state.tour = { step: 0, hello };
@@ -958,16 +961,65 @@ function tourStep() {
   if (!t) return;
   if (t.step >= TOUR.length) return tourFinal();
   const s = TOUR[t.step];
+  const step = t.step;
   if (s.players && state.tableView !== "players") {
     state.tableView = "players";
     if (state.tab === "table") refreshTable();
   }
-  if (state.tab !== s.tab) go(s.tab);
+  const moved = state.tab !== s.tab;
+  if (moved) go(s.tab);
   const g = guideOf(state.fav);
   const text = (t.step === 0 && t.hello && g ? `Привет! Я ${esc(g.name)}, покажу, что тут где. ` : "") + s.text;
-  showTour("point", text, `<button type="button" class="btn" data-tour="next">Дальше</button>
-    <div class="coach-row"><button type="button" class="coach-skip" data-tour="done">Пропустить</button>
-    <span class="coach-count">${t.step + 1} из ${TOUR.length}</span></div>`, s.tab);
+  coachDim(s.tab);   // пока экран собирается и данные идут — только затемнение
+  findAim(s.aim, moved ? AIM_SETTLE_MS : 0).then((el) => {
+    if (state.tour !== t || t.step !== step || t.away) return;
+    showTour("point", text, `<button type="button" class="btn" data-tour="next">Дальше</button>
+      <div class="coach-row"><button type="button" class="coach-skip" data-tour="done">Пропустить</button>
+      <span class="coach-count">${t.step + 1} из ${TOUR.length}</span></div>`, s.tab, el);
+  });
+}
+
+// Цель шага на экране: ждём, пока экран соберётся и догрузятся данные (лидеры идут отдельным файлом).
+// Селекторы через запятую — по старшинству: первый найденный, а не первый в документе
+function findAim(sel, delay) {
+  const seen = () => {
+    for (const one of sel.split(",")) {
+      const el = $("#screen").querySelector(one);
+      if (el && el.getBoundingClientRect().height) return el;
+    }
+    return null;
+  };
+  return new Promise((done) => {
+    const t0 = Date.now() + delay;
+    const look = () => {
+      const el = Date.now() >= t0 && seen();
+      if (el || Date.now() - t0 > AIM_WAIT_MS) return done(el || null);
+      setTimeout(look, 80);
+    };
+    if (!delay && seen()) done(seen());
+    else setTimeout(look, delay);
+  });
+}
+
+// Нажали по окну цели на шаге с tap: подсказка гаснет, срабатывает сама цель. Лист закроют — тур дальше
+function tapAim(e) {
+  const t = state.tour;
+  const s = t && TOUR[t.step];
+  const el = aim.el;
+  if (!s || !s.tap || !el || !el.isConnected) return;
+  const r = el.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+  t.away = true;
+  closeCoach();
+  el.click();
+}
+
+function tourBack() {
+  const t = state.tour;
+  if (!t || !t.away) return;
+  t.away = false;
+  t.step += 1;
+  setTimeout(tourStep, 240);   // лист успевает уехать
 }
 
 function tourFinal() {
@@ -983,35 +1035,62 @@ function tourFinal() {
   }
 }
 
-function showTour(pose, text, buttons, tab = "") {
-  coach(state.fav, pose, text, buttons, tab, "Подсказки");
+function showTour(pose, text, buttons, tab = "", aimEl = null) {
+  coach(state.fav, pose, text, buttons, tab, "Подсказки", aimEl);
 }
 
-// Карточка проводника по центру экрана: крупный талисман сверху выходит за край, текст, кнопки.
-// Фон притемнён; вкладка меню, о которой речь, поднята над фоном и подсвечена
-function coach(club, pose, text, buttons, tab, label) {
+function coachBox() {
   let box = $("#tour");
-  const fresh = !box;
-  if (fresh) {
-    box = document.createElement("div");
-    box.id = "tour";
-    box.className = "coach";
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    document.body.appendChild(box);
-  }
-  box.setAttribute("aria-label", label);
-  box.classList.toggle("low", !!tab);
-  const fig = pose ? guideFig(club, pose) : "";
-  box.innerHTML = `<div class="coach-back" data-coach-back></div>
-    <div class="coach-card${fig ? "" : " bare"}">${fig ? `<div class="coach-guide">${fig}</div>` : ""}
-      <p aria-live="polite">${text}</p><div class="coach-btns">${buttons}</div></div>`;
+  if (box) return [box, false];
+  box = document.createElement("div");
+  box.id = "tour";
+  box.className = "coach";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-modal", "true");
+  document.body.appendChild(box);
+  if (!calm()) box.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: EASE_OUT });
+  return [box, true];
+}
+
+// Между шагами тура: только затемнение, карточки нет — экран под ним меняется
+function coachDim(tab) {
+  dropAim();
+  const [box] = coachBox();
+  box.setAttribute("aria-label", "Подсказки");
+  box.classList.remove("aim", "low");
+  box.innerHTML = `<div class="coach-back" data-coach-back></div>`;
   lightTab(tab);
+}
+
+// Карточка проводника. Без цели — по центру экрана (у меню, если речь о вкладке): крупный талисман
+// сверху выходит за край. С целью (aimEl) — цель вырезана из затемнения, карточка компактная и рядом.
+// Вкладка меню, о которой речь, поднята над фоном и подсвечена
+function coach(club, pose, text, buttons, tab, label, aimEl = null) {
+  dropAim();
+  const [box, fresh] = coachBox();
+  const hadCard = !!box.querySelector(".coach-card");
+  box.setAttribute("aria-label", label);
+  box.classList.toggle("aim", !!aimEl);
+  box.classList.toggle("low", !!tab && !aimEl);
+  const fig = pose ? guideFig(club, pose) : "";
+  if (aimEl) {
+    const r = aimEl.getBoundingClientRect();
+    const right = r.left + r.width / 2 >= innerWidth / 2 - 1;
+    box.innerHTML = `<div class="coach-back" data-coach-back></div><div class="coach-hole"></div>
+      <div class="coach-card${right ? " right" : ""}"><span class="coach-tail"></span>
+        <div class="coach-say">${fig}<p aria-live="polite">${text}</p></div><div class="coach-btns">${buttons}</div></div>`;
+    aimAt(box, aimEl);
+  } else {
+    box.innerHTML = `<div class="coach-back" data-coach-back></div>
+      <div class="coach-card${fig ? "" : " bare"}">${fig ? `<div class="coach-guide">${fig}</div>` : ""}
+        <p aria-live="polite">${text}</p><div class="coach-btns">${buttons}</div></div>`;
+  }
+  lightTab(tab, !!aimEl);
   if (!calm()) {
     const card = box.querySelector(".coach-card");
-    if (fresh) {
-      box.querySelector(".coach-back").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: EASE_OUT });
-      card.animate([{ opacity: 0, transform: "translateY(24px) scale(.96)" }, { opacity: 1, transform: "none" }], { duration: 260, easing: EASE_OUT });
+    if (!hadCard) {
+      const from = aimEl && aim.side === "above" ? -16 : 24;
+      card.animate([{ opacity: 0, transform: `translateY(${from}px) scale(.96)` }, { opacity: 1, transform: "none" }], { duration: 260, easing: EASE_OUT });
     } else {
       card.animate([{ opacity: 0.5 }, { opacity: 1 }], { duration: 160, easing: EASE_OUT });
     }
@@ -1023,16 +1102,80 @@ function coach(club, pose, text, buttons, tab, label) {
   if (first) first.focus({ preventScroll: true });
 }
 
-function lightTab(tab) {
+// Окно в затемнении над целью и карточка рядом. Сторону выбираем один раз, при прокрутке и смене
+// размера окна Telegram только догоняем цель
+const AIM_PAD = 8;    // окно шире цели с каждой стороны
+const AIM_GAP = 14;   // от окна до карточки — там хвостик
+const aim = { el: null, side: "", off: null };
+
+function aimAt(box, el) {
+  aim.el = el;
+  aim.side = "";
+  placeAim(box, el);
+  let queued = false;
+  const follow = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; if (aim.el === el && el.isConnected) placeAim(box, el); });
+  };
+  addEventListener("scroll", follow, { passive: true });
+  addEventListener("resize", follow);
+  aim.off = () => { removeEventListener("scroll", follow); removeEventListener("resize", follow); };
+}
+
+function dropAim() {
+  if (aim.off) aim.off();
+  aim.el = aim.off = null;
+  aim.side = "";
+}
+
+function placeAim(box, el) {
+  const hole = box.querySelector(".coach-hole");
+  const card = box.querySelector(".coach-card");
+  const tail = box.querySelector(".coach-tail");
+  const marquee = document.querySelector(".marquee");
+  const tabs = $("#tabs");
+  const top0 = (marquee ? Math.max(0, marquee.getBoundingClientRect().bottom) : 0) + 12;
+  const bottom0 = (tabs && !tabs.hidden ? tabs.getBoundingClientRect().top : innerHeight) - 12;
+  const h = card.offsetHeight;
+  let r = el.getBoundingClientRect();
+  if (!aim.side) {
+    if (bottom0 - (r.bottom + AIM_PAD + AIM_GAP) >= h) aim.side = "below";
+    else if (r.top - AIM_PAD - AIM_GAP - top0 >= h) aim.side = "above";
+    else {
+      // не влезает ни под целью, ни над ней: поднимаем цель под бегущую строку, карточка — под ней.
+      // Запас сверху — под наклейки, которые выходят за край цели (талисман на паспорте), если есть место
+      const room = bottom0 - top0 - (r.height + 2 * AIM_PAD + AIM_GAP + h);
+      scrollBy(0, r.top - AIM_PAD - top0 - Math.max(0, Math.min(20, room)));
+      r = el.getBoundingClientRect();
+      aim.side = "below";
+    }
+  }
+  const radius = (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0) + AIM_PAD;
+  Object.assign(hole.style, { left: `${r.left - AIM_PAD}px`, top: `${r.top - AIM_PAD}px`,
+    width: `${r.width + 2 * AIM_PAD}px`, height: `${r.height + 2 * AIM_PAD}px`, borderRadius: `${radius}px` });
+  const y = aim.side === "below" ? r.bottom + AIM_PAD + AIM_GAP : r.top - AIM_PAD - AIM_GAP - h;
+  card.style.top = `${Math.max(top0, Math.min(y, bottom0 - h))}px`;
+  card.classList.toggle("up", aim.side === "above");   // карточка над целью — хвостик снизу
+  const c = card.getBoundingClientRect();
+  tail.style.left = `${Math.max(28, Math.min(r.left + r.width / 2 - c.left, c.width - 28)) - 8}px`;
+}
+
+// aimed — пульсирует цель, у вкладки кольцо без пульса
+function lightTab(tab, aimed = false) {
   document.querySelectorAll("#tabs .coach-hl").forEach((b) => b.classList.remove("coach-hl"));
   const tabs = $("#tabs");
-  if (tabs) tabs.classList.toggle("coach-on", !!tab);
+  if (tabs) {
+    tabs.classList.toggle("coach-on", !!tab);
+    tabs.classList.toggle("coach-aim", !!tab && aimed);
+  }
   const btn = tab && document.querySelector(`#tabs [data-tab="${tab}"]`);
   if (btn) btn.classList.add("coach-hl");
 }
 
 function closeCoach() {
   state.meet = null;
+  dropAim();
   lightTab("");
   const box = $("#tour");
   if (!box) return;
@@ -1635,6 +1778,7 @@ function closeMatch(fromY = 0) {
   const back = $("#sheet-backdrop");
   if (sheet.hidden || sheetClosing) return;
   document.body.classList.remove("sheet-open");
+  tourBack();   // лист открыли из тура нажатием по цели — тур идёт дальше
   if (inTelegram) {
     tg.BackButton.hide();
     tgSwipes(true);
@@ -1811,7 +1955,7 @@ document.addEventListener("click", (e) => {
   if (!el || el.disabled) return;
   if (el.dataset.guide) return guideHop(el);
   if (el.hasAttribute("data-meet-close") || (el.hasAttribute("data-coach-back") && state.meet)) return closeCoach();
-  if (el.hasAttribute("data-coach-back")) return;
+  if (el.hasAttribute("data-coach-back")) return tapAim(e);
   if (el.dataset.tour) {
     haptic();
     if (el.dataset.tour === "next" && state.tour) {

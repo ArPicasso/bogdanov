@@ -626,9 +626,29 @@ h1, .display {
 .coach-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .coach-skip { min-height: 44px; padding: 0 10px; border: 0; background: none; color: var(--muted); font: 700 13px/1 var(--ui); letter-spacing: .03em; cursor: pointer; }
 .coach-count { color: var(--muted); font-size: 12px; }
-/* Вкладка, о которой говорит тур, — над притемнением и с пульсирующей обводкой */
+/* Шаг тура с целью: цель вырезана из затемнения окном, карточка компактная и встаёт рядом с целью.
+   Затемнение рисует окно (заливка вокруг него), .coach-back прозрачный и ловит нажатия */
+.coach.aim { display: block; padding: 0; }
+.coach.aim .coach-back { background: none; }
+.coach-hole { position: absolute; pointer-events: none; box-shadow: 0 0 0 200vmax rgba(9, 13, 20, .58); }
+.coach-hole::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 3px var(--sun); animation: coach-pulse 1.2s ease-in-out infinite; }
+.coach.aim .coach-card { position: absolute; left: 16px; right: 16px; width: auto; margin: 0 auto; padding: 14px 16px 6px; }
+.coach-say { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; text-align: left; }
+.coach-card.right .coach-say { flex-direction: row-reverse; }
+.coach-say .guide img { width: 72px; height: 72px; }
+.coach-card.right .coach-say .guide img { transform: scaleX(-1) rotate(-6deg); }
+.coach-say p { margin: 0; flex: 1; min-width: 0; font-size: 16px; line-height: 1.35; }
+/* Хвостик смотрит на цель: карточка под целью — сверху, над целью — снизу */
+.coach-tail {
+  position: absolute; top: -9px; width: 16px; height: 16px;
+  border-left: var(--line); border-top: var(--line); background: var(--paper);
+  transform: rotate(45deg);
+}
+.coach-card.up .coach-tail { top: auto; bottom: -9px; border: 0; border-right: var(--line); border-bottom: var(--line); }
+/* Вкладка, о которой говорит тур, — над притемнением и с пульсирующей обводкой. Есть цель — пульсирует она */
 .tabs.coach-on { z-index: 12; }
 .tabs .coach-hl { box-shadow: 0 0 0 3px var(--sun); animation: coach-pulse 1.2s ease-in-out infinite; }
+.tabs.coach-aim .coach-hl { animation: none; }
 @keyframes coach-pulse { 50% { box-shadow: 0 0 0 7px var(--sun); } }
 .guide-empty { display: grid; justify-items: center; gap: 10px; }
 
@@ -1023,5 +1043,5 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
 
 @media (prefers-reduced-motion: reduce) {
   .tabs button, .pick, .pick .em, .cta-bar, .pills button, .seg button, .chips button { transition: none; }
-  .pick.pop, .sk, .row.busy, .flow.draw .fl-cover, .flow.draw .fl-dot .v, .tabs .coach-hl { animation: none; }
+  .pick.pop, .sk, .row.busy, .flow.draw .fl-cover, .flow.draw .fl-dot .v, .tabs .coach-hl, .coach-hole::after { animation: none; }
 }
