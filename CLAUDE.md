@@ -34,6 +34,7 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица), `h2h.json` и разборы матчей `matches/<id>.json` (ADR-008) |
 | `history.py` | Матчи пяти прошлых сезонов НМХЛ с сайта лиги → `history.json` для очных встреч (ADR-006) |
 | `history.json` | Прошлые сезоны, команды уже в id из `teams.json`. В git, пересобирается руками раз в сезон |
+| `history_protocols.json` | Протоколы прошлых матчей из «Последних встреч» для их разбора (ADR-008). В git, докачивается `history.py --protocols` |
 | `webapp/` | Мини-апп: `index.html`, `style.css`, `app.js`, без сборки. Публикуется на GitHub Pages |
 | `webapp/brand/` | Иконка для экрана загрузки Telegram и фавиконки (`icon.svg`, `icon-512.png`) |
 | `webapp/logos/` | Эмблемы всех 26 клубов, 200×200 PNG с прозрачным фоном, путь — поле `logo` в `teams.json` |
@@ -60,6 +61,7 @@ BOT_TOKEN=... venv/bin/python bot.py
 venv/bin/python -m unittest discover -s tests   # тесты
 venv/bin/python league.py                        # скачать протоколы в results.json
 venv/bin/python history.py                       # прошлые сезоны в history.json (раз в сезон)
+venv/bin/python history.py --protocols           # затем протоколы прошлых встреч, ~30 минут
 venv/bin/python build_data.py                    # собрать webapp/data/league.json и h2h.json
 cd webapp && python3 -m http.server 8000         # мини-апп в браузере: localhost:8000
 ```

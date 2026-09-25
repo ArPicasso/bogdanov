@@ -1,4 +1,5 @@
 """История очных встреч (ADR-006): разбор архива календарей и подсчёт по парам."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -23,7 +24,11 @@ class CalendarArchive(unittest.TestCase):
     def test_whole_playoff_2025_26(self):
         self.assertEqual(len(self.games), 53)
         self.assertEqual(self.games[0], {"date": "2026-03-28", "home": "МХК Ермак", "away": "Прогресс",
-                                         "home_score": 5, "away_score": 4, "decision": "Б"})
+                                         "home_score": 5, "away_score": 4, "decision": "Б",
+                                         "tournament": 1379, "game_id": 901741})
+
+    def test_every_game_has_protocol_link(self):
+        self.assertTrue(all(g["game_id"] and g["tournament"] == 1379 for g in self.games))
 
     def test_final_game(self):
         self.assertEqual(self.games[-1]["date"], "2026-05-13")
@@ -65,6 +70,45 @@ class FormerNames(unittest.TestCase):
                          [("vityaz-podolsk", "ryazan-vdv", [3, 2])])
 
 
+class PastRecaps(unittest.TestCase):
+    """Разбор прошлых матчей из «Последних встреч» (ADR-008)."""
+
+    def history(self):
+        return [{"date": f"202{i}-10-01", "season": "x", "stage": "regular", "home": "ryazan-vdv",
+                 "away": "belgorod", "score": [1, 0], "decision": "", "tournament": 1, "game_id": 100 + i}
+                for i in range(7)] + [{"date": "2021-01-01", "season": "x", "stage": "regular", "home": "tambov",
+                                       "away": "belgorod", "score": [1, 0], "decision": ""}]
+
+    def test_candidates_are_last_five_of_each_pair(self):
+        self.assertEqual([g["game_id"] for g in history.recap_candidates(self.history())],
+                         [102, 103, 104, 105, 106])
+
+    def test_meeting_gets_id_only_with_protocol(self):
+        season = [{"id": "n1", "date": "2026-10-03", "home": "ryazan-vdv", "away": "belgorod"}]
+        h2h = b.head_to_head(season, self.history(), {"106", "105"})
+        ids = [m.get("id") for m in h2h["belgorod|ryazan-vdv"]["last"]]
+        self.assertEqual(ids, ["h106", "h105", None, None, None])
+
+    def test_past_recap_is_self_contained(self):
+        p = league.parse_protocol(fixture("protocol_900942_regular.html"), 900942).to_json()
+        h = {"date": "2025-10-04", "season": "25/26", "stage": "regular", "home": "ryazan-vdv",
+             "away": "belgorod", "score": [6, 1], "decision": "", "tournament": 1378, "game_id": 900942}
+        protocols = {"900942": json.loads(json.dumps(history.compact(p)))}
+        out = b.past_recaps([h], protocols, {"h900942"}, {"ryazan-vdv": "Рязань-ВДВ", "belgorod": "Белгород"})
+        d = out["h900942"]
+        self.assertEqual((d["game"]["season"], d["game"]["score"]["home"], len(d["game"]["goals"])), ("25/26", 6, 7))
+        self.assertEqual(d["shots"], {"home": 45, "away": 15})
+        self.assertEqual(d["lineups"]["home"]["D"][1], {"no": 85, "name": "Захаров Иван Сер.", "cap": "", "g": 0, "a": 0})
+        self.assertTrue(d["story"].startswith("Первыми забили гости"))
+        self.assertEqual(b.past_recaps([h], protocols, set(), {}), {})
+
+    def test_protocols_file_is_readable(self):
+        protocols = b.load_history_protocols()
+        self.assertIsInstance(protocols, dict)
+        known = {str(g.get("game_id")) for g in b.load_history()}
+        self.assertTrue(set(protocols) <= known)
+
+
 class HeadToHead(unittest.TestCase):
     past = [
         {"date": "2024-10-01", "home": "ryazan-vdv", "away": "belgorod", "score": [3, 1], "decision": ""},
@@ -72,8 +116,8 @@ class HeadToHead(unittest.TestCase):
         {"date": "2025-10-01", "home": "belgorod", "away": "ryazan-vdv", "score": [0, 2], "decision": ""},
     ]
     season = [
-        {"date": "2026-10-03", "home": "ryazan-vdv", "away": "belgorod"},
-        {"date": "2026-10-10", "home": "ryazan-vdv", "away": "tambov",
+        {"id": "n1", "date": "2026-10-03", "home": "ryazan-vdv", "away": "belgorod"},
+        {"id": "n2", "date": "2026-10-10", "home": "ryazan-vdv", "away": "tambov",
          "score": {"home": 2, "away": 1, "decision": "ОТ"}},
     ]
     h2h = b.head_to_head(season, past)

@@ -549,7 +549,7 @@ h1, .display {
 
 .grab { width: 40px; height: 5px; border-radius: 9999px; background: var(--edge-strong); margin: 2px auto 14px; }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
-.sheet-head .when { font-weight: 700; font-size: 13px; }
+.sheet-head .when { flex: 1; min-width: 0; font-weight: 700; font-size: 13px; }
 .btn-round {
   flex: none;
   display: grid;
