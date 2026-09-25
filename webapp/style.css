@@ -507,28 +507,18 @@ h1, .display {
 .lead-card.empty-card { cursor: default; border-style: dashed; border-color: var(--edge-strong); }
 .lc-none { margin-top: auto; font: 500 13px/1.3 var(--ui); color: var(--muted); }
 
-/* Фигура игрока вместо фото (ADR-009): наклейка одинаковая в обеих темах, как эмблемы */
-.fig { flex: none; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; }
-.fig .fg-bg { fill: #dceeff; }
-.fig .fg-ring { fill: none; stroke: var(--edge); stroke-width: 1; }
-.fig.goalie .fg-bg { fill: #e9ccff; }
-.fig .fg-shirt, .fig .fg-face { fill: #fff; stroke: #000; stroke-width: 1.2; stroke-linejoin: round; }
-.fig .fg-helmet { fill: #4da2ff; stroke: #000; stroke-width: 1.2; stroke-linejoin: round; }
-.fig .fg-mask { fill: #ffd731; stroke: #000; stroke-width: 1.2; }
-.fig .fg-visor { fill: #cfe6ff; stroke: #000; stroke-width: 1; }
-.fig .fg-stick { fill: none; stroke: #000; stroke-width: 2.4; stroke-linecap: round; }
-.fig .fg-eye { fill: #000; }
-.fig .fg-line, .fig .fg-cage { fill: none; stroke: #000; stroke-width: 1.1; stroke-linecap: round; }
-:root[data-theme="dark"] .fig .fg-bg { fill: #c9d8ea; }
-:root[data-theme="dark"] .fig.goalie .fg-bg { fill: #d6c6e6; }
-:root[data-theme="dark"] .fig .fg-shirt, :root[data-theme="dark"] .fig .fg-face { fill: #e6e9ee; }
+/* Стикер игрока вместо фото (ADR-009): картинка из webapp/players/, одинаковая в обеих темах,
+   как эмблемы. Номер на груди — текстом, кегль от ширины стикера */
+.fig { position: relative; display: block; container-type: inline-size; border-radius: 50%; }
+.fig img { display: block; width: 100%; height: 100%; }
+.fig::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--edge); }
+.fig-num { position: absolute; left: 0; right: 0; top: 71%; text-align: center; color: #000; font: 800 20cqw/1 var(--display); letter-spacing: -0.02em; }
 /* Стикер игрока: фигура, эмблема клуба наклеена на её правый нижний край */
 .ps { position: relative; flex: none; display: inline-block; width: 36px; height: 36px; }
 .ps .fig { display: block; width: 100%; height: 100%; }
 .ps .em { position: absolute; right: -5px; bottom: -3px; width: 18px; height: 18px; border: 1px solid var(--edge); }
 .ps.lg { width: 46px; height: 46px; transform: rotate(-6deg); }
 .ps.lg .em { width: 22px; height: 22px; right: -6px; bottom: -4px; }
-.fig .fg-num { font: 800 9px/1 "Unbounded", system-ui, sans-serif; fill: #000; text-anchor: middle; }
 
 /* Свои в лидерах и топ-10 в листе: место, игрок, одно число справа */
 .mine-row { grid-template-columns: 36px 1fr; }
