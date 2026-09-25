@@ -1,0 +1,30 @@
+name: Опубликовать эмодзи
+
+# Публикует stickers/emoji/*.webp набором кастомных эмодзи (ADR-005, tools/upload_emoji.py).
+# Запуск заново пересоздаёт набор из текущих картинок.
+on:
+  workflow_dispatch:
+    inputs:
+      owner_id:
+        description: "Telegram id владельца набора (он должен хоть раз написать боту)"
+        required: true
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Поставить зависимости
+        run: pip install --disable-pip-version-check -q -r requirements.txt
+
+      - name: Опубликовать набор
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_ID: ${{ inputs.owner_id }}
+        run: python tools/upload_emoji.py
