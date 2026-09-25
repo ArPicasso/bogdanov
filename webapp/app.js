@@ -7,6 +7,7 @@ let inTelegram = false;
 const launchedInTelegram = /tgWebAppData=/.test(location.hash);
 const TZ = "Europe/Moscow";
 const FAV_KEY = "fav_team";
+const REMIND_TEAM = "ryazan-vdv";   // напоминания бот пока шлёт только о её матчах
 const THEME_KEY = "theme";          // "auto" | "light" | "dark", хранится на устройстве
 const SPLASH_KEY = "splash_team";   // эмблема для заставки: её рисуют до загрузки данных
 const SURFACE = { light: "#ffffff", dark: "#131922" };
@@ -766,7 +767,7 @@ function leadCard(cat, r) {
 // Игроки любимой команды в списках лиги: по строке на игрока, в подписи — все его места.
 // Нажатие открывает список, где он выше всего
 const LEAD_BY = { pts: "по очкам", g: "по голам", a: "по передачам", pm: "по плюс-минусу", sv_pct: "среди вратарей", pim: "по штрафу" };
-function mineBlock(d) {
+function mineBlock(d, season = false) {
   if (!state.fav) return "";
   const people = new Map();
   const who = new Map();
@@ -779,7 +780,8 @@ function mineBlock(d) {
   }
   if (!people.size) return "";
   const rows = [...people].map(([name, places]) => [name, places.sort((x, y) => x[1] - y[1])]).sort((x, y) => x[1][0][1] - y[1][0][1]);
-  return `<div class="label">${esc(team(state.fav).name)} в лидерах</div><div class="list mine-leads">${rows.map(([name, places]) =>
+  const aside = season ? `<span class="aside">${esc(d.league)} ${esc(d.season)}</span>` : "";
+  return `<div class="label">${esc(team(state.fav).name)} в лидерах${aside}</div><div class="list mine-leads">${rows.map(([name, places]) =>
     `<div class="row mine-row" data-lead-open="${places[0][0]}" role="button" tabindex="0">
       <span class="ps">${figure(who.get(name))}</span>
       <span class="ml-who"><b>${esc(name)}</b><small>${places.map(([cat, rank]) => `${rank}-й ${LEAD_BY[cat]}`).join(" · ")}</small></span>
@@ -864,11 +866,121 @@ function teamGrid(chosen, attr) {
 
 function renderOnboarding() {
   const chosen = state.draft;
-  let html = `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
+  let html = `<section class="band sky"><div class="cap-intro"><span id="cap-onb">${capFig(chosen ? "thumbs" : "hello", chosen)}</span>
+      <div class="bubble" id="cap-say">${capOnbText(chosen)}</div></div>
+    <h1>За кого<br>болеешь?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
   html += teamGrid(chosen, "data-pick");
   const label = chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду";
   html += `<div style="height:88px"></div><div class="cta-bar${chosen ? "" : " wait"}"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
   return html;
+}
+
+// ---------- Кэп: знакомство и подсказки (ADR-010) ----------
+
+const TOUR_KEY = "tour_done";
+const tourDone = () => lsGet(TOUR_KEY) === "1";
+
+// Поза Кэпа — webapp/cap/<поза>.webp (список собирает build_data.py). Пока поз нет — круглый
+// стикер полевого с номером 26 (сезон 2026/27). С выбранным клубом Кэп «в его форме»: без поз —
+// сам стикер в форме клуба, с позами — такой стикер наклеен рядом
+function capFig(pose, club) {
+  const bust = () => figure({ kit: club || null, role: "F", number: 26 });
+  if (state.data && state.data.cap && state.data.cap.includes(pose)) {
+    const kit = club ? `<span class="ps cap-kit">${bust()}</span>` : "";
+    return `<span class="cap"><img class="cap-img" src="cap/${pose}.webp" alt="" decoding="async">${kit}</span>`;
+  }
+  return `<span class="cap"><span class="ps cap-ps">${bust()}</span></span>`;
+}
+
+function capOnbText(club) {
+  return club
+    ? `Отличный выбор! Я уже в форме «${esc(team(club).name)}». Жми «Готово» — покажу, что где.`
+    : "Привет! Я Кэп. Выбирай команду — потом покажу, что тут где.";
+}
+
+// Тур — три подсказки на живых экранах: облачко Кэпа над меню показывает на вкладку
+const TOUR = [
+  { tab: "home", text: "Здесь ближайший матч, последний счёт и место команды в таблице." },
+  { tab: "table", players: true, text: "А тут лучшие игроки лиги. Нажми на карточку — будет топ-10." },
+  { tab: "me", text: "Это твой паспорт болельщика. Выложи его в историю — пусть все знают, за кого болеешь." },
+];
+
+function startTour(hello) {
+  state.tour = { step: 0, hello };
+  tourStep();
+}
+
+function tourStep() {
+  const t = state.tour;
+  if (!t) return;
+  if (t.step >= TOUR.length) return tourFinal();
+  const s = TOUR[t.step];
+  if (s.players && state.tableView !== "players") {
+    state.tableView = "players";
+    if (state.tab === "table") refreshTable();
+  }
+  if (state.tab !== s.tab) go(s.tab);
+  const text = (t.step === 0 && t.hello ? "Привет! Я Кэп, покажу, что тут где. " : "") + s.text;
+  showTour("point", text, `<button type="button" class="btn small" data-tour="next">Дальше</button>
+    <button type="button" class="tour-skip" data-tour="done">Пропустить</button>
+    <span class="tour-count">${t.step + 1} из ${TOUR.length}</span>`, s.tab);
+}
+
+function tourFinal() {
+  const bot = state.data.links && state.data.links.bot;
+  if (state.fav === REMIND_TEAM && bot) {
+    showTour("cheer", "Напомнить о матче? Я напишу в боте накануне и в день игры.",
+      `<button type="button" class="btn small" data-tour="remind">Напомнить</button>
+       <button type="button" class="tour-skip" data-tour="done">Не сейчас</button>`);
+  } else {
+    showTour("cheer", "Всё, болеем! Если что — подсказки можно вернуть в «Я».",
+      `<button type="button" class="btn small" data-tour="done">Поехали</button>`);
+  }
+}
+
+function showTour(pose, text, buttons, tab = "") {
+  let box = $("#tour");
+  const fresh = !box;
+  if (fresh) {
+    box = document.createElement("div");
+    box.id = "tour";
+    box.className = "tour";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "Подсказки Кэпа");
+    document.body.appendChild(box);
+  }
+  box.innerHTML = `${capFig(pose, state.fav)}<div class="tour-body"><p aria-live="polite">${text}</p><div class="tour-btns">${buttons}</div></div><i class="tour-arrow" aria-hidden="true"></i>`;
+  box.dataset.tab = tab;
+  placeTourArrow();
+  setTimeout(placeTourArrow, 340);   // вкладка меню расширяется — стрелка догоняет её
+  const anim = fresh ? [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }] : [{ opacity: 0.4 }, { opacity: 1 }];
+  if (!calm()) box.animate(anim, { duration: 220, easing: EASE_OUT });
+  const first = box.querySelector("button");
+  if (first) first.focus({ preventScroll: true });
+}
+
+// Стрелка облачка — над серединой нужной вкладки меню; без вкладки стрелки нет
+function placeTourArrow() {
+  const box = $("#tour");
+  if (!box) return;
+  const arrow = box.querySelector(".tour-arrow");
+  const btn = box.dataset.tab && document.querySelector(`#tabs [data-tab="${box.dataset.tab}"]`);
+  arrow.hidden = !btn;
+  if (!btn) return;
+  const r = btn.getBoundingClientRect();
+  const b = box.getBoundingClientRect();
+  arrow.style.left = `${Math.min(Math.max(r.left + r.width / 2 - b.left - 7, 18), b.width - 32)}px`;
+}
+
+function finishTour() {
+  state.tour = null;
+  lsSet(TOUR_KEY, "1");
+  if (cloud()) cloud().setItem(TOUR_KEY, "1", () => {});
+  const box = $("#tour");
+  if (!box) return;
+  if (calm()) return box.remove();
+  box.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(12px)" }], { duration: 160, easing: EASE_IN }).finished
+    .then(() => box.remove()).catch(() => box.remove());
 }
 
 // ---------- экран «Я» (ADR-004) ----------
@@ -893,6 +1005,7 @@ const ICON_ME = {
   bell: '<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
   swap: '<svg viewBox="0 0 24 24"><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  help: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .9-1 1.6v.4M12 16.8v.2"/></svg>',
 };
 
 function passport(me) {
@@ -923,13 +1036,20 @@ function renderMe() {
     <button type="button" class="btn" data-story>${ICON_ME.story}${canStory() ? "Выложить в историю" : "Поделиться карточкой"}</button>
     <button type="button" class="btn ghost" data-invite>${ICON_ME.invite}Позвать болеть вместе</button>
   </div>`;
+  // игроки своей команды в лидерах лиги (ADR-010): данные лидеров грузятся один раз, как на «Игроках»
+  html += `<div id="me-leads">${state.leaders ? mineBlock(state.leaders, true) : ""}</div>`;
+  if (!state.leaders) loadLeaders().then(() => {
+    const box = $("#me-leads");
+    if (box && state.leaders && state.tab === "me") { box.innerHTML = mineBlock(state.leaders, true); fadeIn(box); }
+  });
   html += `<div class="label">Настройки</div><div class="menu">`;
   if (bot) {
-    html += me === "ryazan-vdv"
+    html += me === REMIND_TEAM
       ? `<button type="button" class="menu-row" data-remind>${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Накануне и в день игры — в боте</small></span>${ICON_ME.chev}</button>`
       : `<div class="menu-row off">${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Пока только о «Рязань-ВДВ». Скоро — о любой команде</small></span></div>`;
   }
   html += `<button type="button" class="menu-row" data-switch-open>${ICON_ME.swap}<span><b>Сменить команду</b><small>Сейчас: ${esc(t.name)}</small></span>${ICON_ME.chev}</button>
+  <button type="button" class="menu-row" data-tour-restart>${ICON_ME.help}<span><b>Показать подсказки</b><small>Кэп ещё раз покажет, что где</small></span>${ICON_ME.chev}</button>
   </div>`;
   html += themePills();
   return html + footer();
@@ -1001,7 +1121,7 @@ function h2hSkeleton() {
   return `<div class="sk sk-label"></div><div class="sk" style="height:152px"></div><div class="sk sk-label"></div><div class="sk" style="height:${5 * 75}px"></div>`;
 }
 function failBlock(title, what) {
-  return `<div class="label">${title}</div><div class="empty">Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div>`;
+  return `<div class="label">${title}</div><div class="empty cap-empty">${capFig("shrug")}<div>Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div></div>`;
 }
 function fadeIn(el) {
   if (el && !calm()) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
@@ -1610,11 +1730,27 @@ function confirmTeam(id = state.draft || state.fav) {
   state.tab = !wasFav && state.tableView === "players" ? "table" : "home";
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render(dir);
+  // новичок, пришедший не по ссылке, — Кэп показывает приложение (ADR-010)
+  if (!wasFav && !tourDone() && !state.openedFromLink) nextFrame(() => startTour(false));
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-open],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-open],[data-tour],[data-tour-restart],#sheet-backdrop");
   if (!el || el.disabled) return;
+  if (el.dataset.tour) {
+    haptic();
+    if (el.dataset.tour === "next" && state.tour) {
+      state.tour.step += 1;
+      return tourStep();
+    }
+    if (el.dataset.tour === "remind") {
+      const url = `${state.data.links.bot}?start=remind`;
+      if (inTelegram) tg.openTelegramLink(url);
+      else window.open(url, "_blank", "noopener");
+    }
+    return finishTour();
+  }
+  if (el.hasAttribute("data-tour-restart")) return startTour(false);
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
   if (el.hasAttribute("data-story")) return shareStory();
@@ -1693,6 +1829,13 @@ document.addEventListener("click", (e) => {
     el.classList.remove("pop");
     void el.offsetWidth;   // перезапустить анимацию на той же карточке
     el.classList.add("pop");
+    // Кэп переодевается в форму выбранного клуба (ADR-010)
+    const cap = $("#cap-onb");
+    if (cap) {
+      cap.innerHTML = capFig("thumbs", state.draft);
+      $("#cap-say").innerHTML = capOnbText(state.draft);
+      if (!calm()) cap.firstElementChild.animate([{ transform: "scale(.8) rotate(-12deg)" }, { transform: "none" }], { duration: 320, easing: "cubic-bezier(.2, 1.6, .4, 1)" });
+    }
     const btn = $("[data-confirm]");
     btn.disabled = false;
     btn.textContent = `Готово — ${team(state.draft).name}`;
@@ -1755,6 +1898,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
 function resyncRunners() {
   if (state.fav) setTab(state.tab, false);
   placeRunners(document.body);
+  placeTourArrow();
 }
 window.addEventListener("resize", resyncRunners);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(resyncRunners);
@@ -1814,6 +1958,13 @@ function initTelegram() {
   applyTheme();
   // команда могла быть выбрана на другом устройстве — она в облаке Telegram
   const c = cloud();
+  if (c && !tourDone()) {
+    c.getItem(TOUR_KEY, (err, v) => {
+      if (err || v !== "1") return;
+      lsSet(TOUR_KEY, "1");
+      if (state.tour && state.tour.step === 0) finishTour();
+    });
+  }
   if (!state.fav && state.data && c) {
     c.getItem(FAV_KEY, (err, v) => {
       if (err || !v || !state.teams[v] || state.fav) return;
@@ -1897,6 +2048,10 @@ function boot(d, cached = false) {
   if (mid && !state.openedFromLink && (games().some((g) => g.id === mid) || /^h\d+$/.test(mid))) {
     state.openedFromLink = true;
     openMatch(mid);
+  }
+  // Кэп знакомится и с теми, кто выбрал команду раньше, — один раз и не поверх ссылки из бота
+  if (state.fav && !tourDone() && !state.openedFromLink && !state.tour) {
+    setTimeout(() => { if (!state.tour && !tourDone() && $("#sheet").hidden) startTour(true); }, (cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS) + 500);
   }
 }
 
