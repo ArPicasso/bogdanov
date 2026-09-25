@@ -513,12 +513,12 @@ h1, .display {
 .fig img { display: block; width: 100%; height: 100%; }
 .fig::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--edge); }
 .fig-num { position: absolute; left: 0; right: 0; top: 71%; text-align: center; color: #000; font: 800 20cqw/1 var(--display); letter-spacing: -0.02em; }
-/* Стикер игрока: фигура, эмблема клуба наклеена на её правый нижний край */
+/* Стикер игрока: фигура, эмблема клуба наклеена на правый верхний край — внизу номер */
 .ps { position: relative; flex: none; display: inline-block; width: 36px; height: 36px; }
 .ps .fig { display: block; width: 100%; height: 100%; }
-.ps .em { position: absolute; right: -5px; bottom: -3px; width: 18px; height: 18px; border: 1px solid var(--edge); }
+.ps .em { position: absolute; right: -5px; top: -3px; width: 18px; height: 18px; border: 1px solid var(--edge); }
 .ps.lg { width: 46px; height: 46px; transform: rotate(-6deg); }
-.ps.lg .em { width: 22px; height: 22px; right: -6px; bottom: -4px; }
+.ps.lg .em { width: 22px; height: 22px; right: -7px; top: -4px; }
 
 /* Свои в лидерах и топ-10 в листе: место, игрок, одно число справа */
 .mine-row { grid-template-columns: 36px 1fr; }
