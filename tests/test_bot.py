@@ -1,4 +1,5 @@
 """Онбординг бота (ADR-005): тексты, кнопки и стикеры — без Telegram и без токена."""
+import json
 import re
 import sys
 import unittest
@@ -48,6 +49,13 @@ class Stickers(unittest.TestCase):
             data = (bot.STICKERS / f"{n}.webp").read_bytes()
             self.assertEqual(data[:4] + data[8:12], b"RIFFWEBP", n)
             self.assertLess(len(data), 512 * 1024, n)   # лимит Telegram на статичный стикер
+
+    def test_emoji_set(self):
+        icons = json.loads((bot.STICKERS / "emoji.json").read_text(encoding="utf-8"))
+        self.assertLessEqual(len(icons), 200)   # лимит набора кастомных эмодзи
+        for n in icons:
+            data = (bot.STICKERS / "emoji" / f"{n}.webp").read_bytes()
+            self.assertEqual(data[:4] + data[8:12], b"RIFFWEBP", n)
 
 
 if __name__ == "__main__":
