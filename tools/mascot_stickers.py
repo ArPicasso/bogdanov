@@ -68,9 +68,11 @@ def foreground(small: Image.Image) -> bytearray:
                 stack.append((nx, ny))
 
     # Карманы фона между фигурами: вырубки соседних наклеек сомкнулись, и заливка от краёв туда не
-    # дошла. Карман — кусок цвета фона, обведённый белым. Серое внутри фигуры обведено чёрным контуром
-    pocket = bytearray(fg[i] and near(px[i % w, i // w]) for i in range(w * h))
+    # дошла. Карман — кусок цвета фона (с тенью от наклеек), обведённый белой вырубкой. Серое внутри
+    # фигуры обведено чёрным контуром и цветом фона почти не бывает
+    shade = lambda c: max(c) - min(c) < 28 and 60 < sum(c) / 3 < 236
     white = lambda c: min(c) > 225
+    pocket = bytearray(fg[i] and (near(c := px[i % w, i // w]) or shade(c)) for i in range(w * h))
     for start in range(w * h):
         if not pocket[start]:
             continue
@@ -87,16 +89,16 @@ def foreground(small: Image.Image) -> bytearray:
                     pocket[j] = 0
                     part.append(j)
                     stack.append(j)
-                elif fg[j] and not near(px[nx, ny]):
-                    rim.append(white(px[nx, ny]))
-        if len(part) > w * h * 0.001 and rim and sum(rim) > len(rim) * 0.6:
+                elif fg[j] and not (near(c := px[nx, ny]) or shade(c)):
+                    rim.append(white(c))
+        flat = sum(near(px[i % w, i // w]) for i in part)
+        if len(part) >= 24 and flat >= len(part) * 0.3 and rim and sum(rim) > len(rim) * 0.6:
             for i in part:
                 fg[i] = 0
 
     # Midjourney кладёт под наклейку мягкую серую тень — на тёмной теме она вышла бы серым ореолом.
     # Дочищаем от фона серое без цвета, не заходя глубже SHADOW: белая вырубка и чёрный контур
     # тень останавливают, а серые места самой фигуры так далеко от фона не лежат
-    shade = lambda c: max(c) - min(c) < 28 and 60 < sum(c) / 3 < 236
     front = deque(i for i in range(w * h) if not fg[i])
     dist = {i: 0 for i in front}
     while front:
