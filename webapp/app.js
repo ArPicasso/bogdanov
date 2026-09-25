@@ -26,6 +26,7 @@ const ICON = {
   home: '<svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>',
   away: '<svg viewBox="0 0 24 24"><path d="M3 12h13M12 6l6 6-6 6"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
 };
 // «Надувная лента» Slush — плоская, без градиента: синяя трубка в чёрном контуре
 const RIBBON = `<svg class="ribbon" viewBox="0 0 220 150" aria-hidden="true">
@@ -595,11 +596,14 @@ function h2hBlock(g) {
     <div class="h2h-row goals-row"><span></span><b class="num">${h.goals[a]}</b><span>шайбы</span><b class="num">${h.goals[b]}</b><span></span></div>
     <div class="h2h-verdict">${esc(h2hVerdict(h, a, b))}</div>
   </div>`;
-  html += `<div class="label">Последние встречи</div><div class="list">${h.last.map((m) => {
+  const tappable = h.last.some((m) => m.id);
+  html += `<div class="label">Последние встречи${tappable ? `<span class="aside">нажми — будет разбор</span>` : ""}</div><div class="list">${h.last.map((m) => {
     const lead = (id) => (id === m.home ? m.score[0] > m.score[1] : m.score[1] > m.score[0]);
     const line = (id, goals) => `<div>${emblem(id)}<span class="nm${lead(id) ? " me" : ""}">${esc(team(id).name)}</span><span class="gl${lead(id) ? " lead" : ""}">${goals}</span></div>`;
     const dec = m.decision ? `<span class="res l">${esc(m.decision)}</span>` : "";
-    return `<div class="row two static"><div class="t">${line(m.home, m.score[0])}${line(m.away, m.score[1])}</div><div class="r">${dec}<span class="kick when">${esc(shortDate(m.date))}</span></div></div>`;
+    // встреча с разбором (ADR-008) открывается, как матч календаря
+    const attrs = m.id ? ` role="button" tabindex="0" data-game="${esc(m.id)}" aria-label="${esc(`Разбор матча ${team(m.home).name} — ${team(m.away).name}, ${shortDate(m.date)}`)}"` : "";
+    return `<div class="row two${m.id ? "" : " static"}"${attrs}><div class="t">${line(m.home, m.score[0])}${line(m.away, m.score[1])}</div><div class="r">${dec}<span class="kick when">${esc(shortDate(m.date))}</span></div></div>`;
   }).join("")}</div>`;
   return html;
 }
@@ -623,6 +627,11 @@ function loadRecap(id) {
   }
   return recapLoading[id];
 }
+
+// Матч этого сезона — из league.json, прошлого — целиком из своего файла разбора
+const findGame = (id) => games().find((x) => x.id === id) || (recaps[id] && recaps[id].game) || null;
+const sheetStack = [];   // из прошлой встречи «Назад» ведёт в матч, откуда её открыли
+const STAGE = { regular: "регулярный чемпионат", playoff: "плей-офф" };
 
 const secs = (t) => { const [m, s] = String(t).split(":").map(Number); return m * 60 + (s || 0); };
 const sideTeam = (g, side) => (side === "away" ? g.away : g.home);
@@ -845,34 +854,45 @@ function factsHTML(g) {
   if (d && d.coaches) {
     for (const s of ["home", "away"]) if (d.coaches[s]) html += `<dt>Тренер ${esc(team(sideTeam(g, s)).name)}</dt><dd>${esc(d.coaches[s])}</dd>`;
   }
-  html += `<dt>Календарь</dt><dd>${g.official ? "ФХР, официальный" : '<span class="tag soft">предварительно</span>'}</dd>`;
+  if (g.season) html += `<dt>Турнир</dt><dd>НМХЛ ${esc(g.season)}, ${esc(STAGE[g.stage] || g.stage)}</dd>`;
+  else html += `<dt>Календарь</dt><dd>${g.official ? "ФХР, официальный" : '<span class="tag soft">предварительно</span>'}</dd>`;
   if (g.score) html += `<dt>Источник счёта</dt><dd>протокол лиги</dd>`;
   return html + `</dl></div>`;
 }
 
 function rerenderRecap() {
-  const g = games().find((x) => x.id === recapView.id);
+  const g = findGame(recapView.id);
   const box = $("#recap");
   if (!g || !box || $("#sheet").hidden) return;
   box.innerHTML = recapHTML(g);
   $("#facts").innerHTML = factsHTML(g);
 }
 
-function openMatch(id) {
-  const g = games().find((x) => x.id === id);
-  if (!g) return;
+function openMatch(id, from = null) {
+  const g = findGame(id);
+  if (!g) {
+    // прошлый матч: его нет в league.json, сначала файл разбора
+    if (/^h\d+$/.test(id)) loadRecap(id).then((d) => { if (d && d.game) openMatch(id, from); });
+    return;
+  }
+  if (from && from !== id) sheetStack.push(from);
   if (recapView.id !== id) {
     const gw = recaps[id] ? recaps[id].gw : null;
     Object.assign(recapView, { id, tab: "goals", pens: false, side: g.home === state.fav || g.away !== state.fav ? "home" : "away",
       pick: gw != null ? gw : g.goals && g.goals.length ? g.goals.length - 1 : null });
   }
+  const back = sheetStack.length
+    ? `<button class="btn-round" data-back aria-label="Назад к матчу">${ICON.back}</button>` : "";
+  const when = g.season
+    ? `${esc(fmtLong(g.date))} ${parseISO(g.date).getUTCFullYear()} · НМХЛ ${esc(g.season)}${g.stage === "playoff" ? ", плей-офф" : ""}`
+    : `${esc(fmtLong(g.date))} ${parseISO(g.date).getUTCFullYear()} · ${esc(until(g.date))}`;
   let html = `<div class="grab"></div>
-    <div class="sheet-head"><span class="when">${esc(fmtLong(g.date))} ${parseISO(g.date).getUTCFullYear()} · ${esc(until(g.date))}</span>
+    <div class="sheet-head">${back}<span class="when">${when}</span>
     <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
     <div class="board-card">${board(g)}${periodsLine(g)}</div>`;
 
   if (g.score) html += `<div id="recap">${recapHTML(g)}</div>`;
-  html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : ""}</div>`;
+  if (!g.season) html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : ""}</div>`;
   html += `<div id="facts">${factsHTML(g)}</div>`;
 
   showSheet(html);
@@ -883,12 +903,18 @@ function openMatch(id) {
       rerenderRecap();
     });
   }
-  if (!state.h2h) {
+  if (!state.h2h && !g.season) {
     loadH2H().then(() => {
       const box = $("#h2h");
       if (state.h2h && box && !$("#sheet").hidden && box.dataset.pair === pairKey(g.home, g.away)) box.innerHTML = h2hBlock(g);
     });
   }
+}
+
+// «Назад» в листе: из прошлой встречи — к матчу, откуда её открыли; иначе закрыть
+function sheetBack() {
+  if (!sheetStack.length) return closeMatch();
+  openMatch(sheetStack.pop());
 }
 
 function showSheet(html) {
@@ -897,7 +923,7 @@ function showSheet(html) {
   sheet.hidden = false;
   $("#sheet-backdrop").hidden = false;
   sheet.scrollTop = 0;
-  sheetOpener = document.activeElement;
+  if (!sheetOpener) sheetOpener = document.activeElement;   // при переходе внутри листа — прежний
   sheet.querySelector("[data-close]").focus({ preventScroll: true });
   if (inTelegram) {
     tg.BackButton.show();
@@ -906,6 +932,7 @@ function showSheet(html) {
 }
 
 function closeMatch() {
+  sheetStack.length = 0;
   if ($("#sheet").hidden) return;
   $("#sheet").hidden = true;
   $("#sheet-backdrop").hidden = true;
@@ -987,7 +1014,7 @@ function confirmTeam(id = state.draft || state.fav) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -1005,6 +1032,7 @@ document.addEventListener("click", (e) => {
     return render();
   }
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
+  if (el.hasAttribute("data-back")) return sheetBack();
   if (el.dataset.recapTab || el.dataset.recapGoal || el.dataset.recapPens || el.dataset.recapSide) {
     if (el.dataset.recapTab) recapView.tab = el.dataset.recapTab;
     if (el.dataset.recapGoal) recapView.pick = Number(el.dataset.recapGoal);
@@ -1021,7 +1049,7 @@ document.addEventListener("click", (e) => {
   }
   if (el.hasAttribute("data-confirm")) return confirmTeam();
   if (el.dataset.tab) return go(el.dataset.tab);
-  if (el.dataset.game) return openMatch(el.dataset.game);
+  if (el.dataset.game) return openMatch(el.dataset.game, el.closest("#sheet") ? recapView.id : null);
   if (el.dataset.pick) {
     state.draft = el.dataset.pick;
     haptic();
@@ -1060,7 +1088,7 @@ document.addEventListener("click", (e) => {
 
 // Строки и карточки с role="button" нажимаются с клавиатуры, Esc закрывает карточку матча
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") return closeMatch();
+  if (e.key === "Escape") return sheetBack();
   if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) {
     e.preventDefault();
     e.target.dispatchEvent(new MouseEvent("click", { bubbles: true }));   // у SVG нет .click()
@@ -1098,7 +1126,7 @@ function initTelegram() {
   tg.ready();
   tg.expand();
   tg.onEvent("themeChanged", applyTheme);
-  tg.BackButton.onClick(closeMatch);
+  tg.BackButton.onClick(sheetBack);
   if (!$("#sheet").hidden) tg.BackButton.show();
   applyTheme();
   // команда могла быть выбрана на другом устройстве — она в облаке Telegram
@@ -1162,7 +1190,7 @@ function boot(d) {
   render();
   hideSplash();
   const mid = matchParam();
-  if (mid && !state.openedFromLink && games().some((g) => g.id === mid)) {
+  if (mid && !state.openedFromLink && (games().some((g) => g.id === mid) || /^h\d+$/.test(mid))) {
     state.openedFromLink = true;
     openMatch(mid);
   }

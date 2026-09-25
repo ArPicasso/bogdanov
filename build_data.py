@@ -18,6 +18,7 @@ TEAMS_FILE = BASE / "teams.json"
 OFFICIAL_GAMES = BASE / "games.json"
 OFFICIAL_TEAM = "ryazan-vdv"          # у кого из команд есть официальный календарь — games.json
 HISTORY_FILE = BASE / "history.json"
+HISTORY_PROTOCOLS = BASE / "history_protocols.json"   # протоколы матчей из «Последних встреч» (ADR-008)
 HIDDEN_FILE = BASE / "hidden_players.json"
 OUT = BASE / "webapp" / "data" / "league.json"
 HIDDEN_NAME = "Игрок скрыт"
@@ -94,6 +95,18 @@ def shown(player: dict | None, hidden: set[int] = frozenset()) -> str:
     return HIDDEN_NAME if player.get("id") in hidden else player["name"]
 
 
+def fill_result(g: dict, p: dict, hidden: set[int] = frozenset()) -> None:
+    """Счёт, голы и сведения из протокола — в матч, как их ждёт мини-апп."""
+    g["n"] = g.get("n") or p.get("n")
+    g["time"] = p.get("time")
+    g["attendance"] = p.get("attendance")
+    g["score"] = {"home": p["home_score"], "away": p["away_score"], "decision": p["decision"],
+                  "periods": p["periods"]}
+    g["goals"] = [{"period": x["period"], "time": x["time"], "team": x["team"], "score": x["score"],
+                   "strength": x["strength"], "author": shown(x["author"], hidden),
+                   "assists": [shown(a, hidden) for a in x["assists"]]} for x in p["goals"]]
+
+
 def attach_results(games: list[dict], teams: Teams, results: league.Results,
                    protocols: dict[str, dict] | None = None, hidden: set[int] = frozenset()) -> list[str]:
     """Протоколы лиги ложатся на матчи по дате и командам. Возвращает непривязанные.
@@ -108,17 +121,32 @@ def attach_results(games: list[dict], teams: Teams, results: league.Results,
             if g is None:
                 unmatched.append(f"{p['date']} {p['home']} — {p['away']}")
                 continue
-            g["n"] = g["n"] or p["n"]
-            g["time"] = p["time"]
-            g["attendance"] = p["attendance"]
-            g["score"] = {"home": p["home_score"], "away": p["away_score"], "decision": p["decision"],
-                          "periods": p["periods"]}
-            g["goals"] = [{"period": x["period"], "time": x["time"], "team": x["team"], "score": x["score"],
-                           "strength": x["strength"], "author": shown(x["author"], hidden),
-                           "assists": [shown(a, hidden) for a in x["assists"]]} for x in p["goals"]]
+            fill_result(g, p, hidden)
             if protocols is not None:
                 protocols[g["id"]] = p
     return unmatched
+
+
+def past_id(h: dict) -> str:
+    """Id прошлого матча в мини-аппе: h + номер протокола на сайте лиги."""
+    return f"h{h['game_id']}"
+
+
+def past_recaps(history: list[dict], protocols: dict[str, dict], wanted: set[str], teams: dict[str, str],
+                hidden: set[int] = frozenset()) -> dict[str, dict]:
+    """Разборы прошлых матчей из «Последних встреч». Матча нет в league.json — он лежит в файле целиком."""
+    out = {}
+    for h in history:
+        if not h.get("game_id") or past_id(h) not in wanted or str(h["game_id"]) not in protocols:
+            continue
+        g = {"id": past_id(h), "n": None, "date": h["date"], "home": h["home"], "away": h["away"],
+             "season": h["season"], "stage": h["stage"]}
+        p = protocols[str(h["game_id"])]
+        fill_result(g, p, hidden)
+        d = match_detail(g, p, teams, hidden)
+        d["game"] = g
+        out[g["id"]] = d
+    return out
 
 # ---------- разбор матча (ADR-008) ----------
 
@@ -254,17 +282,17 @@ def match_detail(g: dict, p: dict, teams: dict[str, str], hidden: set[int] = fro
     other = {"home": "away", "away": "home"}
     lineups = p.get("lineups", [])
     goalies = [{"team": k["team"], "no": k["player"]["number"], "name": shown(k["player"], hidden),
-                "shots": k["shots_against"], "saves": k["saves"], "toi": k["toi"]}
-               for k in lineups if k["role"] == "G" and k["played"] and (k["shots_against"] or k["toi"])]
+                "shots": k.get("shots_against", 0), "saves": k.get("saves", 0), "toi": k.get("toi", "")}
+               for k in lineups if k["role"] == "G" and k["played"] and (k.get("shots_against") or k.get("toi"))]
     shots = {side: sum(k["shots"] for k in goalies if k["team"] == other[side]) for side in ("home", "away")}
-    fo = {side: sum(k["faceoffs_won"] for k in lineups if k["team"] == side) for side in ("home", "away")}
+    fo = {side: sum(k.get("faceoffs_won", 0) for k in lineups if k["team"] == side) for side in ("home", "away")}
     pim = {side: sum(x["minutes"] for x in p.get("penalties", []) if x["team"] == side) for side in ("home", "away")}
     rosters: dict[str, dict[str, list]] = {"home": {"G": [], "D": [], "F": []}, "away": {"G": [], "D": [], "F": []}}
     for k in lineups:
         if k["player"].get("id") in hidden:
             continue
-        row = {"no": k["player"]["number"], "name": k["player"]["name"], "cap": k["captain"],
-               "g": k["goals"], "a": k["assists"]}
+        row = {"no": k["player"]["number"], "name": k["player"]["name"], "cap": k.get("captain", ""),
+               "g": k.get("goals", 0), "a": k.get("assists", 0)}
         if not k["played"]:
             row["dnp"] = True
         rosters[k["team"]][k["role"]].append(row)
@@ -347,6 +375,13 @@ def standings(teams: Teams, games: list[dict]) -> dict[str, list[dict]]:
 # ---------- очные встречи ----------
 
 
+def load_history_protocols(path: Path = HISTORY_PROTOCOLS) -> dict[str, dict]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
 def load_history(path: Path = HISTORY_FILE) -> list[dict]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))["games"]
@@ -358,12 +393,19 @@ def pair_key(a: str, b: str) -> str:
     return "|".join(sorted((a, b)))
 
 
-def head_to_head(games: list[dict], history: list[dict]) -> dict[str, dict]:
+def head_to_head(games: list[dict], history: list[dict], with_protocol: set[str] = frozenset()) -> dict[str, dict]:
     """Для каждой пары из календаря сезона: победы, голы и последние встречи (ADR-006).
 
-    Встречи — прошлые сезоны из history.json плюс уже сыгранные матчи этого сезона."""
-    past = [{k: h[k] for k in ("date", "home", "away", "score", "decision")} for h in history]
-    past += [{"date": g["date"], "home": g["home"], "away": g["away"],
+    Встречи — прошлые сезоны из history.json плюс уже сыгранные матчи этого сезона.
+    Встреча с разбором (ADR-008) получает id: прошлая — h<номер протокола>, если протокол скачан
+    в history_protocols.json, этого сезона — id матча из календаря."""
+    past = []
+    for h in history:
+        m = {k: h[k] for k in ("date", "home", "away", "score", "decision")}
+        if h.get("game_id") and str(h["game_id"]) in with_protocol:
+            m["id"] = past_id(h)
+        past.append(m)
+    past += [{"date": g["date"], "home": g["home"], "away": g["away"], "id": g["id"],
               "score": [g["score"]["home"], g["score"]["away"]], "decision": g["score"]["decision"]}
              for g in games if g.get("score")]
     by_pair: dict[str, list[dict]] = {}
@@ -431,6 +473,12 @@ def main() -> None:
     data, unmatched, details = build(teams, raw, league.load_results(args.results), load_hidden())
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    history, past_protocols = load_history(), load_history_protocols()
+    h2h = head_to_head(data["games"], history, set(past_protocols))
+    (args.out.parent / "h2h.json").write_text(json.dumps(h2h, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    wanted = {m["id"] for pair in h2h.values() for m in pair["last"] if m.get("id", "").startswith("h")}
+    names = {t["id"]: t["name"] for t in teams.all}
+    details.update(past_recaps(history, past_protocols, wanted, names, load_hidden()))
     matches = args.out.parent / "matches"
     matches.mkdir(exist_ok=True)
     for old in matches.glob("*.json"):   # матч мог пропасть из календаря — не оставляем чужой файл
@@ -438,8 +486,6 @@ def main() -> None:
             old.unlink()
     for gid, d in details.items():
         (matches / f"{gid}.json").write_text(json.dumps(d, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    h2h = head_to_head(data["games"], load_history())
-    (args.out.parent / "h2h.json").write_text(json.dumps(h2h, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     played = sum(1 for g in data["games"] if g.get("score"))
     print(f"Матчей: {len(data['games'])}, сыграно: {played} → {args.out}")
     for u in unmatched:
