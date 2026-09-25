@@ -20,6 +20,7 @@ OFFICIAL_TEAM = "ryazan-vdv"          # у кого из команд есть �
 HISTORY_FILE = BASE / "history.json"
 HISTORY_PROTOCOLS = BASE / "history_protocols.json"   # протоколы матчей из «Последних встреч» (ADR-008)
 HIDDEN_FILE = BASE / "hidden_players.json"
+PAST_CLUBS_FILE = BASE / "past_clubs.json"   # клубы прошлых сезонов, которых нет в РХЛ: эмблемы для лидеров (ADR-009)
 OUT = BASE / "webapp" / "data" / "league.json"
 HIDDEN_NAME = "Игрок скрыт"
 H2H_LAST = 5
@@ -490,6 +491,15 @@ LEADER_FIELDS = {"pts": ("gp", "g", "a", "pts"), "g": ("gp", "g", "a", "pts"), "
                  "pm": ("gp", "pts", "pm"), "pim": ("gp", "pts", "pim"), "sv_pct": ("gp", "gaa", "sv_pct")}
 
 
+def load_past_logos(path: Path = PAST_CLUBS_FILE) -> dict[str, str]:
+    """Написание клуба → эмблема: для клубов, которых нет в teams.json."""
+    try:
+        clubs = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+    return {norm(n): c["logo"] for c in clubs for n in [c["name"], *c.get("aliases", [])]}
+
+
 def load_leaders(path: Path = league.LEADERS_FILE) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -497,13 +507,15 @@ def load_leaders(path: Path = league.LEADERS_FILE) -> dict:
         return {}
 
 
-def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset()) -> dict | None:
+def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset(), past_logos: dict[str, str] | None = None) -> dict | None:
     """Топ-10 по каждому показателю и лучший игрок каждой команды с 11-го места.
 
     Места — как у лиги. Скрытого игрока нет в списке, место за ним остаётся пустым.
-    Клуб прошлого сезона — нынешний id по teams.json; клуба нет в РХЛ — только название."""
+    Клуб прошлого сезона — нынешний id по teams.json; клуба нет в РХЛ — название и эмблема из
+    past_clubs.json. Амплуа и номер — для фигуры игрока вместо фото (фото не берём, ADR-007)."""
     if not src.get("categories"):
         return None
+    past_logos = load_past_logos() if past_logos is None else past_logos
     m = re.match(r"(\d{2})/(\d{2})", src.get("name", ""))
     out = {
         "season": f"20{m.group(1)}/{m.group(2)}" if m else "",
@@ -521,8 +533,14 @@ def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset()) -> dict | N
             if r["rank"] > LEADERS_TOP and (tid is None or tid in seen):
                 continue
             seen.add(tid)
-            row = {"rank": r["rank"], "name": r["name"], **{k: r.get(k) for k in fields}}
-            row.update({"team": tid} if tid else {"club": r.get("club", "")})
+            row = {"rank": r["rank"], "name": r["name"], "role": r.get("role", ""), "number": r.get("number"),
+                   **{k: r.get(k) for k in fields}}
+            if tid:
+                row["team"] = tid
+            else:
+                row["club"] = r.get("club", "")
+                if norm(row["club"]) in past_logos:
+                    row["logo"] = past_logos[norm(row["club"])]
             rows.append(row)
         out["categories"][cat] = rows
     return out

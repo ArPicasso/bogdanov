@@ -109,11 +109,16 @@ class Leaders(unittest.TestCase):
         rows = top["categories"]["pts"]
         self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
         self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "gp", "g", "a", "pts", "team"})   # без id и лишних цифр
+        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
 
     def test_club_outside_league_keeps_name(self):
         src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
-        self.assertEqual(b.leaders(self.teams, src)["categories"]["pts"][0]["club"], "Буран Мск")
+        row = b.leaders(self.teams, src)["categories"]["pts"][0]
+        self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
+
+    def test_past_club_logos_exist(self):
+        for logo in set(b.load_past_logos().values()):
+            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
 
     def test_hidden_player(self):
         rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
@@ -247,11 +252,16 @@ class Leaders(unittest.TestCase):
         rows = top["categories"]["pts"]
         self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
         self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "gp", "g", "a", "pts", "team"})   # без id и лишних цифр
+        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
 
     def test_club_outside_league_keeps_name(self):
         src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
-        self.assertEqual(b.leaders(self.teams, src)["categories"]["pts"][0]["club"], "Буран Мск")
+        row = b.leaders(self.teams, src)["categories"]["pts"][0]
+        self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
+
+    def test_past_club_logos_exist(self):
+        for logo in set(b.load_past_logos().values()):
+            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
 
     def test_hidden_player(self):
         rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
@@ -413,11 +423,16 @@ class Leaders(unittest.TestCase):
         rows = top["categories"]["pts"]
         self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
         self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "gp", "g", "a", "pts", "team"})   # без id и лишних цифр
+        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
 
     def test_club_outside_league_keeps_name(self):
         src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
-        self.assertEqual(b.leaders(self.teams, src)["categories"]["pts"][0]["club"], "Буран Мск")
+        row = b.leaders(self.teams, src)["categories"]["pts"][0]
+        self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
+
+    def test_past_club_logos_exist(self):
+        for logo in set(b.load_past_logos().values()):
+            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
 
     def test_hidden_player(self):
         rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
