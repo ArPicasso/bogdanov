@@ -18,11 +18,20 @@ class AppUrl(unittest.TestCase):
             self.assertEqual(bot.app_url("ryazan-vdv"), "https://x.github.io/app/?v=2&team=ryazan-vdv")
             self.assertEqual(bot.app_url(), "https://x.github.io/app/?v=2")
 
-    def test_app_button_is_web_app(self):
+    def test_one_button_opens_app(self):
         with mock.patch.object(bot, "WEBAPP_URL", "https://x.github.io/app/"):
-            kb = bot.app_kb("arktika", remind=True).inline_keyboard
+            kb = bot.app_kb("arktika").inline_keyboard
+        self.assertEqual(len(kb), 1)
+        self.assertEqual(len(kb[0]), 1)
         self.assertEqual(kb[0][0].web_app.url, "https://x.github.io/app/?team=arktika")
-        self.assertEqual(kb[1][0].callback_data, "r:open")
+
+    def test_app_url_has_default(self):
+        self.assertTrue(bot.WEBAPP_URL.startswith("https://"))
+
+    def test_no_old_schedule_menu(self):
+        src = (ROOT / "bot.py").read_text(encoding="utf-8")
+        for old in ("ReplyKeyboardMarkup", "set_my_commands", "Следующая игра", "calendar.pdf"):
+            self.assertNotIn(old, src)
 
 
 class Welcome(unittest.TestCase):
