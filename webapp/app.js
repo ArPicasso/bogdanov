@@ -1184,7 +1184,7 @@ function flowChart(g, d) {
       ${pens}${plabels}${dotEls}
     </svg></div>
     <div class="flow-cap" aria-live="polite">
-      <div class="tm num">${esc(cur.time)}</div>${emblem(sideTeam(g, cur.team))}
+      <div class="tm num">${esc(cur.time)}</div>${matchSticker(g, cur.team, cur.no, cur.gk)}
       <div class="who">${esc(cur.author)}${strengthTag(cur, cur.i ?? g.goals.indexOf(cur), d)}<small>${cur.assists.length ? cur.assists.map(esc).join(", ") : "без передач"}</small></div>
       <div class="sc num">${esc(cur.score)}</div>
     </div>
@@ -1197,6 +1197,13 @@ function penaltyPeriod(p, g) {
   const s = secs(p.time);
   if (s >= 3600) return "ОТ";
   return String(Math.min(3, Math.floor(s / 1200) + 1));
+}
+
+// Стикер игрока в разборе матча: форма его команды, номер из протокола, эмблема в углу (ADR-009).
+// Командный штраф — без игрока, у него остаётся эмблема
+function matchSticker(g, side, no, gk) {
+  const id = sideTeam(g, side);
+  return playerSticker({ team: id, kit: id, role: gk ? "G" : "F", number: no });
 }
 
 function goalsTab(g, d) {
@@ -1219,15 +1226,15 @@ function goalsTab(g, d) {
     if (it.kind === "g") {
       html += `<div class="goal${it.i === recapView.pick ? " hl" : ""}">
         <div class="tm">${esc(x.period === "РБ" ? "Б" : x.time)}</div>
-        ${emblem(sideTeam(g, x.team))}
+        ${matchSticker(g, x.team, x.no, x.gk)}
         <div class="who">${esc(x.author)}${strengthTag(x, it.i, d)}${x.assists.length ? `<div class="as">${x.assists.map(esc).join(", ")}</div>` : ""}</div>
         <div class="sc">${esc(x.score)}</div>
       </div>`;
     } else {
       html += `<div class="goal pen">
         <div class="tm">${esc(x.time)}</div>
-        ${emblem(sideTeam(g, x.team))}
-        <div class="who">${esc(x.no ? `${x.no}. ${x.who}` : x.who)}<div class="as">${esc(x.why)}</div></div>
+        ${x.no != null ? matchSticker(g, x.team, x.no, x.gk) : `<span class="ps team">${emblem(sideTeam(g, x.team))}</span>`}
+        <div class="who">${esc(x.who)}<div class="as">${esc(x.why)}</div></div>
         <div class="sc">${esc(x.min)} мин</div>
       </div>`;
     }
@@ -1263,7 +1270,7 @@ function statsTab(g, d) {
     for (const k of d.goalies) {
       const pct = k.shots ? `${(Math.round((1000 * k.saves) / k.shots) / 10).toLocaleString("ru-RU")}%` : "—";
       const toi = k.toi && k.toi !== "60:00" && k.toi !== "65:00" ? ` · ${esc(k.toi)} на льду` : "";
-      html += `<div class="gk-row">${emblem(sideTeam(g, k.team))}<div class="nm">${k.no ? `${esc(k.no)}. ` : ""}${esc(k.name)}<small>${k.saves} из ${k.shots} ${plural(k.shots, "броска", "бросков", "бросков")}${toi}</small></div><div class="pc num">${pct}</div></div>`;
+      html += `<div class="gk-row">${matchSticker(g, k.team, k.no, true)}<div class="nm">${esc(k.name)}<small>${k.saves} из ${k.shots} ${plural(k.shots, "броска", "бросков", "бросков")}${toi}</small></div><div class="pc num">${pct}</div></div>`;
     }
     html += `</div>`;
   }
