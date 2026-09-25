@@ -13,6 +13,7 @@ const SURFACE = { light: "#ffffff", dark: "#131922" };
 const HEADER = { light: "#000000", dark: "#0b0f15" };   // в тон бегущей строке
 const DATA_KEY = "league_cache";    // прошлые данные: повторный запуск рисуется сразу, свежие — в фоне
 const SPLASH_MIN_MS = 1400;         // буквы приземляются к 500 мс, остальное — полюбоваться (DESIGN.md)
+const SPLASH_REPEAT_MS = 600;       // повторный запуск с данными на устройстве: только приземление букв
 
 const DOW = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const MON_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -47,6 +48,87 @@ const state = {
 };
 
 const $ = (sel) => document.querySelector(sel);
+
+// ---------- движение (DESIGN.md → «Движение») ----------
+
+const EASE_OUT = "cubic-bezier(.2, .8, .2, 1)";   // приход: быстро и с торможением
+const EASE_IN = "cubic-bezier(.4, 0, 1, 1)";      // уход: с разгоном
+const calm = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+const nextFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));   // после того, как кадр нарисован
+
+// Бегунок в сегментах и чипах: заливка выбранного перетекает к новой кнопке.
+// Группы с бегунком помечены data-run — по этому ключу бегунок узнаёт себя после перерисовки
+function runnerState(root) {
+  const m = {};
+  root.querySelectorAll("[data-run] > .run").forEach((r) => {
+    if (r.dataset.w) m[r.parentNode.dataset.run] = { x: +r.dataset.x, w: +r.dataset.w };
+  });
+  return m;
+}
+function placeRunner(group, from) {
+  const run = group.querySelector(":scope > .run");
+  const on = group.querySelector(":scope > button.on");
+  if (!run || !on || !on.offsetWidth) return;
+  const to = { x: on.offsetLeft, w: on.offsetWidth };
+  Object.assign(run.dataset, { x: to.x, w: to.w });
+  run.style.transform = `translateX(${to.x}px)`;
+  run.style.width = `${to.w}px`;
+  group.classList.add("ready");
+  if (from && !calm() && (from.x !== to.x || from.w !== to.w)) {
+    run.animate([{ transform: `translateX(${from.x}px)`, width: `${from.w}px` }, { transform: `translateX(${to.x}px)`, width: `${to.w}px` }],
+      { duration: 260, easing: EASE_OUT });
+  }
+}
+function placeRunners(root, prev = {}) {
+  root.querySelectorAll("[data-run]").forEach((g) => placeRunner(g, prev[g.dataset.run]));
+}
+const RUN = '<i class="run" aria-hidden="true"></i>';
+
+// Бегунок меню: вкладки плавно меняют ширину, и заливка едет за новой, пока та растёт
+let tabRun = null;
+let tabAnim = 0;
+function syncTabs(animate) {
+  const nav = $("#tabs");
+  const run = nav.querySelector(".run");
+  const on = nav.querySelector("button.active");
+  if (!run || !on || nav.hidden) return;
+  cancelAnimationFrame(tabAnim);
+  const set = (r) => {
+    tabRun = r;
+    run.style.transform = `translateX(${r.x}px)`;
+    run.style.width = `${r.w}px`;
+  };
+  const target = () => ({ x: on.offsetLeft, w: on.offsetWidth });
+  const from = tabRun;
+  nav.classList.add("ready");
+  if (!animate || !from || calm()) return set(target());
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / 280);
+    const e = 1 - Math.pow(1 - t, 3);
+    const to = target();
+    set({ x: from.x + (to.x - from.x) * e, w: from.w + (to.w - from.w) * e });
+    if (t < 1) tabAnim = requestAnimationFrame(step);
+  };
+  tabAnim = requestAnimationFrame(step);
+}
+
+// Цифры сезона на Главной досчитывают до значения — раз в день, не при каждой смене вкладки
+const COUNT_KEY = "countup_day";
+function countUp(root) {
+  const els = root.querySelectorAll("[data-count]");
+  if (!els.length || calm() || lsGet(COUNT_KEY) === todayISO()) return;
+  lsSet(COUNT_KEY, todayISO());
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / 400);
+    const e = 1 - Math.pow(1 - t, 3);
+    els.forEach((el) => { el.textContent = String(Math.round(+el.dataset.count * e)); });
+    if (t < 1) requestAnimationFrame(step);
+  };
+  els.forEach((el) => { el.textContent = "0"; });
+  requestAnimationFrame(step);
+}
 
 function esc(v) {
   return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -124,8 +206,7 @@ function systemTheme() {
   return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 function applyTheme() {
-  const pref = themePref();
-  const theme = pref === "auto" ? systemTheme() : pref;
+  const theme = themeOf(themePref());
   document.documentElement.dataset.theme = theme;
   if (inTelegram && tg.isVersionAtLeast) {
     if (tg.isVersionAtLeast("6.1")) {
@@ -147,21 +228,50 @@ function addThemeToggle() {
   band.classList.add("has-toggle");
   band.insertAdjacentHTML("afterbegin", `<button class="theme-toggle" data-theme-toggle type="button" aria-label="${toggleLabel()}">${SUN}${MOON}</button>`);
 }
+// Кнопки темы обновляются на месте, экран не перерисовывается
+function syncThemeUI() {
+  const pref = themePref();
+  document.querySelectorAll("[data-theme-toggle]").forEach((b) => b.setAttribute("aria-label", toggleLabel()));
+  document.querySelectorAll("[data-theme-pick]").forEach((b) => {
+    const on = b.dataset.themePick === pref;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on);
+  });
+}
+// Новая тема раскрывается кругом от нажатой кнопки: одна анимация снимка экрана вместо
+// перехода цвета у каждого узла. Без View Transitions — прежний переход цвета, но только на
+// небольших экранах: у «Всей лиги» тысячи узлов, там переключаем сразу
 let themeAnimTimer = 0;
-function toggleTheme(btn) {
+function switchTheme(pref, from) {
   const root = document.documentElement;
-  lsSet(THEME_KEY, root.dataset.theme === "dark" ? "light" : "dark");
-  root.classList.add("theme-anim");
-  applyTheme();
-  btn.setAttribute("aria-label", toggleLabel());
-  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
-  clearTimeout(themeAnimTimer);
-  themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 400);
-  if (state.tab === "me" || !state.fav) {
-    const y = window.scrollY;
-    render();
-    window.scrollTo(0, y);
+  lsSet(THEME_KEY, pref);
+  const before = root.dataset.theme;
+  const swap = () => { applyTheme(); syncThemeUI(); };
+  if (calm() || themeOf(pref) === before) return swap();
+  if (document.startViewTransition) {
+    const r = from.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const R = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const vt = document.startViewTransition(swap);
+    vt.ready.then(() => root.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${R}px at ${x}px ${y}px)`] },
+      { duration: 420, easing: EASE_OUT, pseudoElement: "::view-transition-new(root)" },
+    )).catch(() => {});
+    return;
   }
+  if (document.getElementsByTagName("*").length < 2500) {
+    root.classList.add("theme-anim");
+    clearTimeout(themeAnimTimer);
+    themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 400);
+  }
+  swap();
+}
+function themeOf(pref) {
+  return pref === "auto" ? systemTheme() : pref;
+}
+function toggleTheme(btn) {
+  if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+  switchTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", btn);
 }
 function themePills() {
   const pref = themePref();
@@ -250,7 +360,7 @@ function gameRow(g, me, next) {
     const res = me === state.fav ? resultPill(g) : "";
     right = `<span class="sc num">${mine}:${their}</span>${res}`;
   }
-  return `<div class="row one${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
+  return `<div class="row one${past ? " past" : ""}${next ? " next" : ""}" data-game="${esc(g.id)}" data-date="${esc(g.date)}" role="button" tabindex="0"${next ? ' id="next-anchor"' : ""}>
     <div class="date"><b>${d.getUTCDate()}</b><span>${MON_SHORT[d.getUTCMonth()]} ${DOW[d.getUTCDay()]}</span></div>
     <div class="t"><div>${emblem(opp)}<span class="nm">${esc(team(opp).name)}</span></div><div class="sub">${where}</div></div>
     <div class="r">${right}</div>
@@ -279,21 +389,23 @@ function footer() {
 // ---------- экраны ----------
 
 // Три цифры сезона: в сезоне — место, очки, форма; до старта — матчи, дом и выезд, дни до старта
-function seasonStats(me) {
+function seasonStats(me, count = false) {
   const st = standingOf(me);
   const mine = gamesOf(me);
+  // На Главной цифры досчитывают до значения (countUp), в паспорте — стоят
+  const n = (v) => (count ? `<b data-count="${v}">${v}</b>` : `<b>${v}</b>`);
   if (st && st.row.gp) {
     const form = st.row.form.length ? `<span class="form">${st.row.form.map((f) => `<i class="${f}"></i>`).join("")}</span>` : "—";
-    return `<div class="stat"><b>${st.place}</b><span>место<br>${CONF[st.conf]}</span></div>
-      <div class="stat"><b>${st.row.pts}</b><span>${plural(st.row.pts, "очко", "очка", "очков")}<br>за ${st.row.gp} ${plural(st.row.gp, "игру", "игры", "игр")}</span></div>
+    return `<div class="stat">${n(st.place)}<span>место<br>${CONF[st.conf]}</span></div>
+      <div class="stat">${n(st.row.pts)}<span>${plural(st.row.pts, "очко", "очка", "очков")}<br>за ${st.row.gp} ${plural(st.row.gp, "игру", "игры", "игр")}</span></div>
       <div class="stat"><b>${form}</b><span>форма<br>5 игр</span></div>`;
   }
   if (!mine.length) return "";
   const home = mine.filter((g) => g.home === me).length;
   const days = Math.max(daysFromToday(mine[0].date), 0);
-  return `<div class="stat"><b>${mine.length}</b><span>матчей<br>в сезоне</span></div>
-    <div class="stat"><b>${home}</b><span>дома,<br>${mine.length - home} на выезде</span></div>
-    <div class="stat"><b>${days}</b><span>${plural(days, "день", "дня", "дней")}<br>до старта</span></div>`;
+  return `<div class="stat">${n(mine.length)}<span>матчей<br>в сезоне</span></div>
+    <div class="stat">${n(home)}<span>дома,<br>${mine.length - home} на выезде</span></div>
+    <div class="stat">${n(days)}<span>${plural(days, "день", "дня", "дней")}<br>до старта</span></div>`;
 }
 
 // Самый длинный кусок названия, который нельзя перенести: по нему подбирается кегль шапки
@@ -313,7 +425,7 @@ function renderHome() {
     <div class="hero"><button type="button" class="hero-em" data-switch-open aria-label="Сменить команду">${emblem(me, "xl")}</button><div><h1 style="--w:${longestChunk(t.name)}">${esc(t.name)}</h1><div class="meta">${esc(t.city)} · ${CONF[t.conf] || ""}</div></div></div>
   </section>`;
 
-  const stats = seasonStats(me);
+  const stats = seasonStats(me, true);
   if (stats) html += `<div class="stats">${stats}</div>`;
 
   if (next) {
@@ -354,68 +466,131 @@ function segBtn(on, attrs, inner) {
   return `<button type="button" class="${on ? "on" : ""}" ${attrs} aria-pressed="${on}">${inner}</button>`;
 }
 
-function renderCalendar() {
+function calendarList() {
   const { team: teamId, side, conf } = state.cal;
   let list = teamId ? gamesOf(teamId) : games();
   if (teamId && side !== "all") list = list.filter((g) => (side === "home" ? g.home === teamId : g.away === teamId));
   if (!teamId && conf !== "all") list = list.filter((g) => team(g.home).conf === conf || team(g.away).conf === conf);
+  return list;
+}
+
+// Полоса фильтров Календаря: обновляется на месте, бегунки перетекают к новому выбору
+function filterbarInner() {
+  const { team: teamId, side, conf } = state.cal;
   const other = teamId && teamId !== state.fav;
   const chev = '<svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
-
   // Вторичный фильтр всегда на месте: у команды — дом/выезд, у лиги — конференция. Высота полосы не прыгает
   const sub = teamId
     ? [["all", "Все"], ["home", "Дома"], ["away", "Выезд"]].map(([k, v]) => segBtn(side === k, `data-cal-side="${k}"`, v))
     : [["all", "Все"], ["east", "Восток"], ["west", "Запад"]].map(([k, v]) => segBtn(conf === k, `data-cal-conf="${k}"`, v));
   const otherName = other ? esc(team(teamId).name) : "Другая";
-
-  let html = `<section class="band lavender split"><h1>Календарь</h1></section>
-    <div class="filterbar">
-      <div class="seg" role="group" aria-label="Чей календарь">
+  return `<div class="seg" role="group" aria-label="Чей календарь" data-run="cal-team">${RUN}
         ${segBtn(teamId === state.fav, `data-cal-team="${esc(state.fav)}"`, "<span>Моя команда</span>")}
         ${segBtn(!teamId, 'data-cal-team=""', "<span>Вся лига</span>")}
         ${segBtn(other, 'data-cal-other aria-haspopup="dialog"', `<span>${otherName}</span>${chev}`)}
       </div>
-      <div class="chips" role="group" aria-label="${teamId ? "Где играют" : "Конференция"}">${sub.join("")}</div>
-    </div>`;
+      <div class="chips" role="group" aria-label="${teamId ? "Где играют" : "Конференция"}" data-run="cal-sub">${RUN}${sub.join("")}</div>`;
+}
 
+// Высота месяца до первого показа: строка команды ~65px, строка лиги ~75px, день ~31px.
+// По ней браузер держит место под месяцы вне экрана (content-visibility)
+const MONTH_H = { label: 46, one: 65, two: 75, day: 31 };
+
+function calendarMonths(list) {
+  const teamId = state.cal.team;
   const nextId = (list.find(isUpcoming) || {}).id;
-  let month = "";
-  let day = "";
+  const nextDay = nextId ? list.find((x) => x.id === nextId).date : null;
+  const byMonth = new Map();
   for (const g of list) {
     const m = g.date.slice(0, 7);
-    if (m !== month) {
-      if (month) html += `</div>`;
-      const d = parseISO(g.date);
-      const count = list.filter((x) => x.date.slice(0, 7) === m).length;
-      html += `<div class="label">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">`;
-      month = m;
-      day = "";
-    }
-    if (teamId) {
-      html += gameRow(g, teamId, g.id === nextId);
-    } else {
+    if (!byMonth.has(m)) byMonth.set(m, []);
+    byMonth.get(m).push(g);
+  }
+  let html = "";
+  for (const [, month] of byMonth) {
+    const d = parseISO(month[0].date);
+    const count = month.length;
+    let body = "";
+    let day = "";
+    let days = 0;
+    for (const g of month) {
+      if (teamId) {
+        body += gameRow(g, teamId, g.id === nextId);
+        continue;
+      }
       if (g.date !== day) {
         day = g.date;
-        const next = list.some((x) => x.id === nextId && x.date === day);
+        days += 1;
+        const next = day === nextDay;
         const today = daysFromToday(day) === 0;
-        html += `<div class="day${next ? " next" : ""}"${next ? ' id="next-anchor"' : ""}><span>${esc(fmtLong(day))}</span>${today ? '<span class="tag today">Сегодня</span>' : ""}</div>`;
+        body += `<div class="day${next ? " next" : ""}" data-date="${esc(day)}"${next ? ' id="next-anchor"' : ""}><span>${esc(fmtLong(day))}</span>${today ? '<span class="tag today">Сегодня</span>' : ""}</div>`;
       }
-      html += leagueRow(g);
+      body += leagueRow(g);
     }
+    const h = MONTH_H.label + count * (teamId ? MONTH_H.one : MONTH_H.two) + days * MONTH_H.day;
+    html += `<section class="month" style="contain-intrinsic-size: auto ${h}px"><div class="label">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">${body}</div></section>`;
   }
-  if (month) html += `</div>`;
   if (!list.length) html += `<div class="empty">Матчей нет</div>`;
+  return html;
+}
+
+function renderCalendar() {
+  let html = `<section class="band lavender split"><h1>Календарь</h1></section>
+    <div class="filterbar">${filterbarInner()}</div>`;
+  html += `<div id="cal-list">${calendarMonths(calendarList())}</div>`;
   html += `<div class="foot">Официальный календарь ФХР пока есть только у «Рязань-ВДВ». Остальные даты — предварительные, уточним после открытия сайта РХЛ.</div>`;
   return html;
 }
 
+// День, который сейчас виден у верха списка под прилипшими фильтрами
+function visibleDay() {
+  const bar = $(".filterbar");
+  if (!bar) return null;
+  const top = bar.getBoundingClientRect().bottom;
+  for (const el of document.querySelectorAll("#cal-list [data-date]")) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom > top) return r.top < top + 8 ? { date: el.dataset.date, top: r.top } : null;
+  }
+  return null;
+}
+
+// Смена фильтра Календаря: сначала отвечает нажатая кнопка, список — в следующем кадре.
+// keep — остаться на том же дне; иначе — к ближайшему матчу
+let calToken = 0;
+function refreshCalendar(keep) {
+  const bar = $(".filterbar");
+  if (!bar) return render();
+  const prev = runnerState(bar);
+  bar.innerHTML = filterbarInner();
+  placeRunners(bar, prev);
+  const token = ++calToken;
+  const anchor = keep ? visibleDay() : null;
+  nextFrame(() => {
+    if (token !== calToken || state.tab !== "calendar") return;
+    $("#cal-list").innerHTML = calendarMonths(calendarList());
+    if (anchor) {
+      const els = [...document.querySelectorAll("#cal-list [data-date]")];
+      const el = els.find((x) => x.dataset.date >= anchor.date) || els[els.length - 1];
+      if (el) window.scrollTo(0, window.scrollY + el.getBoundingClientRect().top - anchor.top);
+    } else if (!keep) {
+      const next = $("#next-anchor");
+      if (next) next.scrollIntoView({ block: "center" });
+    }
+  });
+}
+
 function renderTable() {
   const conf = state.conf;
-  const rows = state.data.standings[conf] || [];
-  let html = `<section class="band mint"><h1>Таблица</h1><div class="pills">${Object.entries(CONF)
-    .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}">${v}</button>`)
+  const html = `<section class="band mint"><h1>Таблица</h1><div class="pills" role="group" aria-label="Конференция">${Object.entries(CONF)
+    .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}" aria-pressed="${conf === k}">${v}</button>`)
     .join("")}</div></section>`;
-  html += `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span class="wl">В</span><span class="wl">П</span><span>Ш</span><span>О</span></div>`;
+  return `${html}<div id="table-body">${tableBody()}</div>`;
+}
+
+function tableBody() {
+  const conf = state.conf;
+  const rows = state.data.standings[conf] || [];
+  let html = `<div class="st"><div class="st-row head"><span class="pos"></span><span class="tm">Команда</span><span>И</span><span class="wl">В</span><span class="wl">П</span><span>Ш</span><span>О</span></div>`;
   rows.forEach((r, i) => {
     if (i === PLAYOFF_CUT) html += `<div class="cut"><span>плей-офф ↑</span></div>`;
     const wins = r.w + r.otw + r.sow;
@@ -455,7 +630,7 @@ function renderOnboarding() {
   let html = `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
   html += teamGrid(chosen, "data-pick");
   const label = chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду";
-  html += `<div style="height:88px"></div><div class="cta-bar"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
+  html += `<div style="height:88px"></div><div class="cta-bar${chosen ? "" : " wait"}"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
   return html;
 }
 
@@ -584,6 +759,25 @@ function h2hVerdict(h, a, b) {
   return `По истории встреч сильнее ${team(fav).name}: ${w} ${plural(w, "победа", "победы", "побед")} из ${h.games}`;
 }
 
+// Место под очные встречи, пока они грузятся: та же высота, что у карточки и пяти встреч
+function h2hSkeleton() {
+  return `<div class="sk sk-label"></div><div class="sk" style="height:152px"></div><div class="sk sk-label"></div><div class="sk" style="height:${5 * 75}px"></div>`;
+}
+function failBlock(title, what) {
+  return `<div class="label">${title}</div><div class="empty">Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div>`;
+}
+function fadeIn(el) {
+  if (el && !calm()) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
+}
+function fillH2H(g) {
+  loadH2H().then(() => {
+    const box = $("#h2h");
+    if (!box || $("#sheet").hidden || box.dataset.pair !== pairKey(g.home, g.away)) return;
+    box.innerHTML = state.h2h ? h2hBlock(g) : failBlock("Очные встречи", "h2h");
+    fadeIn(box);
+  });
+}
+
 function h2hBlock(g) {
   const h = state.h2h && state.h2h[pairKey(g.home, g.away)];
   const label = (aside) => `<div class="label">Очные встречи${aside ? `<span class="aside">${aside}</span>` : ""}</div>`;
@@ -617,16 +811,42 @@ let sheetOpener = null;   // куда вернуть фокус после за�
 
 const recaps = {};                 // id матча → data/matches/<id>.json, грузится при открытии карточки
 const recapLoading = {};
-const recapView = { id: null, tab: "goals", pens: false, side: "home", pick: null };
+const recapMissing = new Set();      // у матча нет файла разбора (протокола нет) — это не ошибка
+const recapView = { id: null, tab: "goals", pens: false, side: "home", pick: null, drawn: null };
 
+// null — разбора нет, false — не загрузился (сеть), можно повторить
 function loadRecap(id) {
   if (!recapLoading[id]) {
     recapLoading[id] = fetch(`data/matches/${encodeURIComponent(id)}.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
-      .then((d) => (recaps[id] = d))
-      .catch(() => { delete recapLoading[id]; return null; });
+      .then((r) => (r.ok ? r.json() : r.status === 404 ? null : Promise.reject(new Error(r.status))))
+      .then((d) => {
+        if (d) recaps[id] = d;
+        else recapMissing.add(id);
+        return d;
+      })
+      .catch(() => { delete recapLoading[id]; return false; });
   }
   return recapLoading[id];
+}
+
+// Место под разбор, пока он грузится: сюжет, график, вкладки и голы
+function recapSkeleton(g) {
+  const n = Math.max(1, (g.goals || []).length);
+  return `<div class="sk" style="height:76px;margin-top:12px"></div><div class="sk sk-label"></div><div class="sk" style="height:300px"></div>
+    <div class="sk" style="height:40px;margin-top:24px;border-radius:9999px"></div><div class="sk" style="height:${n * 52 + 40}px;margin-top:14px"></div>`;
+}
+function fillRecap(id) {
+  loadRecap(id).then((d) => {
+    const box = $("#recap");
+    if (recapView.id !== id || !box || $("#sheet").hidden) return;
+    if (d === false) {
+      box.innerHTML = failBlock("Разбор матча", "recap");
+      return fadeIn(box);
+    }
+    if (d && d.gw != null) recapView.pick = d.gw;
+    rerenderRecap();
+    fadeIn(box);
+  });
 }
 
 // Матч этого сезона — из league.json, прошлого — целиком из своего файла разбора
@@ -694,23 +914,29 @@ function flowChart(g, d) {
   }).join("");
 
   const pick = recapView.pick;
+  // Первый показ матча — график рисуется слева направо, точки выскакивают, когда до них дошла линия
+  const draw = recapView.drawn !== g.id;
+  recapView.drawn = g.id;
   const dotEls = dots.map((o) => {
     const pp = o.g.strength && o.g.strength.startsWith("бол");
-    return `<g class="fl-dot${pp ? " pp" : ""}${o.g.i === pick ? " on" : ""}" data-recap-goal="${o.g.i}" role="button" tabindex="0" aria-label="${esc(`Гол ${o.g.time}, ${o.g.author}, счёт ${o.g.score}`)}"><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="14" class="hit"/><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="${o.g.i === pick ? 6 : 4.5}" class="v"/></g>`;
+    const delay = draw ? ` style="--d:${Math.round((600 * (o.x - x0)) / (x1 - x0))}ms"` : "";
+    return `<g class="fl-dot${pp ? " pp" : ""}${o.g.i === pick ? " on" : ""}" data-recap-goal="${o.g.i}"${delay} role="button" tabindex="0" aria-label="${esc(`Гол ${o.g.time}, ${o.g.author}, счёт ${o.g.score}`)}"><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="14" class="hit"/><circle cx="${o.x.toFixed(1)}" cy="${o.y}" r="${o.g.i === pick ? 6 : 4.5}" class="v"/></g>`;
   }).join("");
 
   const cur = g.goals[pick] || goals[goals.length - 1];
   const hasPens = d && d.penalties && d.penalties.length;
   return `<div class="label">Ход матча<span class="aside">разница в счёте</span></div>
-  <div class="flow">
+  <div class="flow${draw ? " draw" : ""}">
     <svg viewBox="0 0 ${W} ${lane.away + 30}" role="img" aria-label="Разница в счёте по ходу матча">
       <defs><clipPath id="fl-up"><rect x="0" y="0" width="${W}" height="${yc}"/></clipPath>
         <clipPath id="fl-dn"><rect x="0" y="${yc}" width="${W}" height="${W}"/></clipPath></defs>
       ${bands}${grid}
-      <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
-      <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
       <line x1="${x0}" x2="${x1}" y1="${yc}" y2="${yc}" class="fl-axis"/>
-      <path d="${line}" class="fl-line"/>
+      <g class="fl-reveal">
+        <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
+        <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
+        <path d="${line}" class="fl-line"/>
+      </g>
       <text class="fl-ax" x="${x0 - 6}" y="${Y(up) + 3}" text-anchor="end">+${up}</text>
       <text class="fl-ax" x="${x0 - 6}" y="${yc + 3}" text-anchor="end">0</text>
       <text class="fl-ax" x="${x0 - 6}" y="${Y(-dn) + 3}" text-anchor="end">−${dn}</text>
@@ -720,7 +946,7 @@ function flowChart(g, d) {
       <text class="fl-ax" x="${x0 - 6}" y="${lane.away + 3}" text-anchor="end">${aAbbr}</text>
       <line x1="${x0}" x2="${x1}" y1="${lane.home}" y2="${lane.home}" class="fl-lane"/>
       <line x1="${x0}" x2="${x1}" y1="${lane.away}" y2="${lane.away}" class="fl-lane"/>` : ""}
-      ${pens}${plabels}${dotEls}
+      <g class="fl-reveal">${pens}</g>${plabels}${dotEls}
     </svg>
     <div class="flow-cap" aria-live="polite">
       <div class="tm num">${esc(cur.time)}</div>${emblem(sideTeam(g, cur.team))}
@@ -743,7 +969,7 @@ function goalsTab(g, d) {
   const pens = (d && d.penalties) || [];
   if (recapView.pens) pens.forEach((x) => items.push({ kind: "p", x, s: secs(x.time) + 0.5, p: penaltyPeriod(x, g) }));
   items.sort((a, b) => a.s - b.s);
-  let html = pens.length ? `<div class="chips" role="group" aria-label="Что показать">
+  let html = pens.length ? `<div class="chips" role="group" aria-label="Что показать" data-run="recap-pens">${RUN}
     <button data-recap-pens="0" class="${recapView.pens ? "" : "on"}" aria-pressed="${!recapView.pens}">Только голы</button>
     <button data-recap-pens="1" class="${recapView.pens ? "on" : ""}" aria-pressed="${recapView.pens}">С удалениями</button></div>` : "";
   if (!items.length) return html + `<div class="empty">В протоколе нет голов</div>`;
@@ -812,7 +1038,7 @@ function statsTab(g, d) {
 function rosterTab(g, d) {
   const side = recapView.side;
   const groups = [["G", "Вратари"], ["D", "Защитники"], ["F", "Нападающие"]];
-  let html = `<div class="chips" role="group" aria-label="Команда">
+  let html = `<div class="chips" role="group" aria-label="Команда" data-run="recap-side">${RUN}
     ${["home", "away"].map((s) => `<button data-recap-side="${s}" class="${side === s ? "on" : ""}" aria-pressed="${side === s}">${esc(team(sideTeam(g, s)).name)}</button>`).join("")}</div>`;
   const r = d.lineups[side];
   html += `<div class="roster">`;
@@ -842,7 +1068,7 @@ function recapHTML(g) {
   if (d && d.lineups) tabs.push(["roster", "Составы"]);
   if (!tabs.some((t) => t[0] === recapView.tab)) recapView.tab = "goals";
   if (tabs.length > 1) {
-    html += `<div class="seg recap-seg" role="tablist">${tabs.map(([k, l]) =>
+    html += `<div class="seg recap-seg" role="tablist" data-run="recap-tab">${RUN}${tabs.map(([k, l]) =>
       `<button role="tab" data-recap-tab="${k}" class="${recapView.tab === k ? "on" : ""}" aria-selected="${recapView.tab === k}">${l}</button>`).join("")}</div>`;
   } else if (g.goals && g.goals.length) {
     html += `<div class="label">Голы<span class="aside">${g.goals.length}</span></div>`;
@@ -873,18 +1099,34 @@ function rerenderRecap() {
   const g = findGame(recapView.id);
   const box = $("#recap");
   if (!g || !box || $("#sheet").hidden) return;
+  const prev = runnerState(box);
   box.innerHTML = recapHTML(g);
+  placeRunners(box, prev);
   $("#facts").innerHTML = factsHTML(g);
 }
 
-function openMatch(id, from = null) {
+// Новая вкладка разбора начинается сразу под прилипшими сегментами, а не там, куда
+// обрезалась прокрутка после смены высоты
+function keepTabTop() {
+  const seg = $("#recap .recap-seg");
+  const body = $("#recap .recap-body");
+  if (!seg || !body) return;
+  const gap = body.getBoundingClientRect().top - seg.getBoundingClientRect().bottom;
+  if (gap < 8) $("#sheet").scrollTop += gap - 8;
+}
+
+// dir: 1 — вперёд (в прошлую встречу), −1 — «Назад»: содержимое листа въезжает с этой стороны
+function openMatch(id, from = null, dir = 0) {
   const g = findGame(id);
   if (!g) {
     // прошлый матч: его нет в league.json, сначала файл разбора
-    if (/^h\d+$/.test(id)) loadRecap(id).then((d) => { if (d && d.game) openMatch(id, from); });
+    if (/^h\d+$/.test(id)) loadRecap(id).then((d) => { if (d && d.game) openMatch(id, from, dir); });
     return;
   }
-  if (from && from !== id) sheetStack.push(from);
+  if (from && from !== id) {
+    sheetStack.push(from);
+    dir = 1;
+  }
   if (recapView.id !== id) {
     const gw = recaps[id] ? recaps[id].gw : null;
     Object.assign(recapView, { id, tab: "goals", pens: false, side: g.home === state.fav || g.away !== state.fav ? "home" : "away",
@@ -900,54 +1142,139 @@ function openMatch(id, from = null) {
     <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
     <div class="board-card">${board(g)}${periodsLine(g)}</div>`;
 
-  if (g.score) html += `<div id="recap">${recapHTML(g)}</div>`;
-  if (!g.season) html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : ""}</div>`;
+  const recapReady = !!recaps[id] || recapMissing.has(id);
+  if (g.score) html += `<div id="recap">${recapReady ? recapHTML(g) : recapSkeleton(g)}</div>`;
+  if (!g.season) html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : h2hSkeleton()}</div>`;
   html += `<div id="facts">${factsHTML(g)}</div>`;
 
-  showSheet(html);
-  if (g.score && !recaps[id]) {
-    loadRecap(id).then((d) => {
-      if (!d || recapView.id !== id) return;
-      if (d.gw != null) recapView.pick = d.gw;
-      rerenderRecap();
-    });
-  }
-  if (!state.h2h && !g.season) {
-    loadH2H().then(() => {
-      const box = $("#h2h");
-      if (state.h2h && box && !$("#sheet").hidden && box.dataset.pair === pairKey(g.home, g.away)) box.innerHTML = h2hBlock(g);
-    });
-  }
+  showSheet(html, dir);
+  if (g.score && !recapReady) fillRecap(id);
+  if (!state.h2h && !g.season) fillH2H(g);
 }
 
 // «Назад» в листе: из прошлой встречи — к матчу, откуда её открыли; иначе закрыть
 function sheetBack() {
   if (!sheetStack.length) return closeMatch();
-  openMatch(sheetStack.pop());
+  openMatch(sheetStack.pop(), null, -1);
 }
 
-function showSheet(html) {
+let sheetClosing = null;   // анимации ухода листа, пока он уезжает вниз
+
+// Пока лист открыт, Telegram не сворачивает мини-апп свайпом вниз: этот жест закрывает лист
+function tgSwipes(on) {
+  if (!inTelegram || !tg.isVersionAtLeast || !tg.isVersionAtLeast("7.7")) return;
+  if (on && tg.enableVerticalSwipes) tg.enableVerticalSwipes();
+  if (!on && tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+}
+
+function showSheet(html, dir = 0) {
   const sheet = $("#sheet");
-  sheet.innerHTML = html;
+  const back = $("#sheet-backdrop");
+  const wasOpen = !sheet.hidden && !sheetClosing;
+  if (sheetClosing) {
+    sheetClosing.forEach((a) => a.cancel());
+    sheetClosing = null;
+  }
+  sheet.style.transform = back.style.opacity = "";
+  sheet.style.pointerEvents = back.style.pointerEvents = "";
+  sheet.innerHTML = `<div class="sheet-page">${html}</div>`;
   sheet.hidden = false;
-  $("#sheet-backdrop").hidden = false;
+  back.hidden = false;
   sheet.scrollTop = 0;
+  document.body.classList.add("sheet-open");
+  placeRunners(sheet);
   if (!sheetOpener) sheetOpener = document.activeElement;   // при переходе внутри листа — прежний
   sheet.querySelector("[data-close]").focus({ preventScroll: true });
+  if (wasOpen && dir && !calm()) {
+    sheet.firstElementChild.animate([{ opacity: 0, transform: `translateX(${dir * 24}px)` }, { opacity: 1, transform: "none" }],
+      { duration: 200, easing: EASE_OUT });
+  }
   if (inTelegram) {
     tg.BackButton.show();
+    if (!wasOpen) tgSwipes(false);
     if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
   }
 }
 
-function closeMatch() {
+// Уход зеркален приходу: лист уезжает вниз с разгоном. fromY — откуда, если его уже тянут пальцем
+function closeMatch(fromY = 0) {
   sheetStack.length = 0;
-  if ($("#sheet").hidden) return;
-  $("#sheet").hidden = true;
-  $("#sheet-backdrop").hidden = true;
-  if (inTelegram) tg.BackButton.hide();
+  const sheet = $("#sheet");
+  const back = $("#sheet-backdrop");
+  if (sheet.hidden || sheetClosing) return;
+  document.body.classList.remove("sheet-open");
+  if (inTelegram) {
+    tg.BackButton.hide();
+    tgSwipes(true);
+  }
   if (sheetOpener && sheetOpener.isConnected) sheetOpener.focus({ preventScroll: true });
   sheetOpener = null;
+  const done = () => {
+    sheet.hidden = true;
+    back.hidden = true;
+    sheet.style.transform = back.style.opacity = "";
+    sheet.style.pointerEvents = back.style.pointerEvents = "";
+  };
+  if (calm()) return done();
+  sheet.style.pointerEvents = back.style.pointerEvents = "none";
+  const anims = [
+    sheet.animate([{ transform: `translateY(${fromY}px)` }, { transform: "translateY(100%)" }], { duration: 200, easing: EASE_IN, fill: "forwards" }),
+    back.animate([{ opacity: back.style.opacity || 1 }, { opacity: 0 }], { duration: 180, easing: "ease-in", fill: "forwards" }),
+  ];
+  sheetClosing = anims;
+  anims[0].finished.then(() => {
+    if (sheetClosing !== anims) return;
+    sheetClosing = null;
+    done();
+    anims.forEach((a) => a.cancel());
+  }).catch(() => {});
+}
+
+// Свайп вниз закрывает лист: он идёт за пальцем, пока прокрутка листа в самом верху.
+// Дальше 30% высоты или быстрым движением — закрыть, иначе пружиной на место
+function initSheetDrag() {
+  const sheet = $("#sheet");
+  const back = $("#sheet-backdrop");
+  const SLOP = 8;   // первые пиксели — ещё не жест, а неточное касание
+  let y0 = 0, dy = 0, lastY = 0, lastT = 0, v = 0, armed = false, drag = false;
+  sheet.addEventListener("touchstart", (e) => {
+    armed = e.touches.length === 1 && sheet.scrollTop <= 0 && !sheetClosing;
+    drag = false;
+    dy = v = 0;
+    y0 = lastY = e.touches[0].clientY;
+    lastT = e.timeStamp;
+  }, { passive: true });
+  sheet.addEventListener("touchmove", (e) => {
+    if (!armed) return;
+    const y = e.touches[0].clientY;
+    dy = y - y0;
+    if (!drag) {
+      if (dy < 0 || sheet.scrollTop > 0) { armed = false; return; }   // листают вверх — обычная прокрутка
+      if (dy < SLOP) return;
+      drag = true;
+    }
+    e.preventDefault();
+    v = (y - lastY) / Math.max(1, e.timeStamp - lastT);
+    lastY = y;
+    lastT = e.timeStamp;
+    const d = Math.max(0, dy - SLOP);
+    sheet.style.transform = `translateY(${d}px)`;
+    back.style.opacity = String(Math.max(0, 1 - d / sheet.offsetHeight));
+  }, { passive: false });
+  const end = () => {
+    armed = false;
+    if (!drag) return;
+    drag = false;
+    const d = Math.max(0, dy - SLOP);
+    if (d > sheet.offsetHeight * 0.3 || v > 0.5) return closeMatch(d);
+    if (!calm()) {
+      sheet.animate([{ transform: `translateY(${d}px)` }, { transform: "translateY(0)" }], { duration: 280, easing: "cubic-bezier(.3, 1.4, .5, 1)" });
+      back.animate([{ opacity: back.style.opacity || 1 }, { opacity: 1 }], { duration: 200, easing: EASE_OUT });
+    }
+    sheet.style.transform = back.style.opacity = "";
+  };
+  sheet.addEventListener("touchend", end);
+  sheet.addEventListener("touchcancel", end);
 }
 
 // ---------- бегущая строка ----------
@@ -970,10 +1297,12 @@ function fillMarquee() {
 
 // ---------- навигация ----------
 
-function render() {
+// dir — направление смены вкладки: новый экран въезжает с её стороны; 0 — без перехода
+function render(dir = 0) {
   const screen = $("#screen");
   const onboarding = !state.fav;
   $("#tabs").hidden = onboarding;
+  document.body.dataset.tab = onboarding ? "" : state.tab;
   if (onboarding) {
     screen.innerHTML = renderOnboarding();
     addThemeToggle();
@@ -987,6 +1316,8 @@ function render() {
   const views = { home: renderHome, calendar: renderCalendar, table: renderTable, me: renderMe };
   screen.innerHTML = views[state.tab]();
   addThemeToggle();
+  placeRunners(screen);
+  syncTabs(!!dir);
   const anchor = state.tab === "calendar" && !state.scrolledToNext && $("#next-anchor");
   if (anchor) {
     anchor.scrollIntoView({ block: "center" });
@@ -994,7 +1325,17 @@ function render() {
   } else if (state.tab !== "calendar") {
     window.scrollTo(0, 0);
   }
+  if (state.tab === "home") countUp(screen);
+  if (dir && !calm()) {
+    // двигаем детей, а не сам экран: его край обрезает сдвиг (#screen в style.css)
+    for (const el of screen.children) {
+      el.animate([{ opacity: 0, transform: `translateX(${dir * 16}px)` }, { opacity: 1, transform: "none" }], { duration: 220, easing: EASE_OUT });
+    }
+  }
 }
+
+const TAB_ORDER = ["home", "calendar", "table", "me"];
+const tabDir = (from, to) => Math.sign(TAB_ORDER.indexOf(to) - TAB_ORDER.indexOf(from)) || 1;
 
 function haptic() {
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
@@ -1002,15 +1343,17 @@ function haptic() {
 
 function go(tab) {
   if (tab === state.tab) return;
+  const dir = tabDir(state.tab, tab);
   state.tab = tab;
   state.draft = null;
   if (tab === "calendar") state.scrolledToNext = false;
   haptic();
-  render();
+  render(dir);
 }
 
 function confirmTeam(id = state.draft || state.fav) {
   if (!id) return;
+  const dir = state.fav ? tabDir(state.tab, "home") : 1;
   state.fav = id;
   state.draft = null;
   state.cal = calFor(id);
@@ -1019,11 +1362,11 @@ function confirmTeam(id = state.draft || state.fav) {
   closeMatch();
   state.tab = "home";
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-  render();
+  render(dir);
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -1035,12 +1378,22 @@ document.addEventListener("click", (e) => {
   }
   if (el.hasAttribute("data-theme-toggle")) return toggleTheme(el);
   if (el.dataset.themePick) {
-    lsSet(THEME_KEY, el.dataset.themePick);
-    applyTheme();
     haptic();
-    return render();
+    return switchTheme(el.dataset.themePick, el);
   }
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
+  if (el.dataset.retry) {
+    const g = findGame(recapView.id);
+    const box = $(`#${el.dataset.retry}`);
+    if (!g || !box) return;
+    haptic();
+    if (el.dataset.retry === "h2h") {
+      box.innerHTML = h2hSkeleton();
+      return fillH2H(g);
+    }
+    box.innerHTML = recapSkeleton(g);
+    return fillRecap(g.id);
+  }
   if (el.hasAttribute("data-back")) return sheetBack();
   if (el.dataset.recapTab || el.dataset.recapGoal || el.dataset.recapPens || el.dataset.recapSide) {
     if (el.dataset.recapTab) recapView.tab = el.dataset.recapTab;
@@ -1052,48 +1405,90 @@ document.addEventListener("click", (e) => {
     const sel = `[data-${attr.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}="${el.dataset[attr]}"]`;
     haptic();
     rerenderRecap();
+    if (el.dataset.recapTab) keepTabTop();
     const f = $(`#recap ${sel}`);
     if (f) f.focus({ preventScroll: true });
     return;
   }
   if (el.hasAttribute("data-confirm")) return confirmTeam();
   if (el.dataset.tab) return go(el.dataset.tab);
-  if (el.dataset.game) return openMatch(el.dataset.game, el.closest("#sheet") ? recapView.id : null);
+  if (el.dataset.game) {
+    const id = el.dataset.game;
+    const from = el.closest("#sheet") ? recapView.id : null;
+    // прошлая встреча грузится из своего файла — строка пульсирует, пока он едет
+    if (!findGame(id) && /^h\d+$/.test(id)) {
+      el.classList.add("busy");
+      el.setAttribute("aria-busy", "true");
+      loadRecap(id).then((d) => {
+        el.classList.remove("busy");
+        el.removeAttribute("aria-busy");
+        if (d && d.game) openMatch(id, from);
+        else if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("error");
+      });
+      return;
+    }
+    return openMatch(id, from);
+  }
   if (el.dataset.pick) {
+    // выбор на месте, без перерисовки: карточка пружинит, «Готово» выезжает снизу
     state.draft = el.dataset.pick;
     haptic();
-    return render();
+    document.querySelectorAll("[data-pick]").forEach((b) => {
+      b.classList.toggle("on", b === el);
+      b.setAttribute("aria-pressed", b === el);
+    });
+    el.classList.remove("pop");
+    void el.offsetWidth;   // перезапустить анимацию на той же карточке
+    el.classList.add("pop");
+    const btn = $("[data-confirm]");
+    btn.disabled = false;
+    btn.textContent = `Готово — ${team(state.draft).name}`;
+    $(".cta-bar").classList.remove("wait");
+    return;
   }
   if (el.hasAttribute("data-cal-other")) return openCalSheet();
   if (el.dataset.calTeam !== undefined || el.dataset.calPick) {
     state.cal = calFor(el.dataset.calPick || el.dataset.calTeam);
-    state.scrolledToNext = false;
     closeMatch();
     haptic();
-    return render();
+    return refreshCalendar(false);
   }
   if (el.dataset.calConf) {
     state.cal.conf = el.dataset.calConf;
     haptic();
-    return render();
+    return refreshCalendar(true);
   }
   if (el.dataset.calSide) {
     state.cal.side = el.dataset.calSide;
     haptic();
-    return render();
+    return refreshCalendar(true);
   }
   if (el.dataset.conf) {
     state.conf = el.dataset.conf;
     haptic();
-    return render();
+    el.parentNode.querySelectorAll("[data-conf]").forEach((b) => {
+      b.classList.toggle("on", b === el);
+      b.setAttribute("aria-pressed", b === el);
+    });
+    $("#table-body").innerHTML = tableBody();
+    return fadeIn($("#table-body"));
   }
   if (el.dataset.team) {
     state.cal = calFor(el.dataset.team);
-    state.scrolledToNext = false;
-    state.tab = "calendar";
-    return render();
+    return go("calendar");
   }
 });
+
+// iOS показывает :active, только если на странице слушают касания
+document.addEventListener("touchstart", () => {}, { passive: true });
+
+// Бегунки держатся за свои кнопки, когда меняется ширина экрана или догрузился шрифт
+function resyncRunners() {
+  syncTabs(false);
+  placeRunners(document.body);
+}
+window.addEventListener("resize", resyncRunners);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(resyncRunners);
 
 // Строки и карточки с role="button" нажимаются с клавиатуры, Esc закрывает карточку матча
 document.addEventListener("keydown", (e) => {
@@ -1136,7 +1531,10 @@ function initTelegram() {
   tg.expand();
   tg.onEvent("themeChanged", applyTheme);
   tg.BackButton.onClick(sheetBack);
-  if (!$("#sheet").hidden) tg.BackButton.show();
+  if (!$("#sheet").hidden) {
+    tg.BackButton.show();
+    tgSwipes(false);
+  }
   applyTheme();
   // команда могла быть выбрана на другом устройстве — она в облаке Telegram
   const c = cloud();
@@ -1152,11 +1550,10 @@ function initTelegram() {
 }
 window.__onTelegram = initTelegram;
 
-function hideSplash() {
+function hideSplash(minMs = SPLASH_MIN_MS) {
   const splash = $("#splash");
   if (!splash || splash.classList.contains("out")) return;
-  const calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const wait = calm ? 0 : Math.max(0, SPLASH_MIN_MS - (Date.now() - (window.__splashT0 || 0)));
+  const wait = calm() ? 0 : Math.max(0, minMs - (Date.now() - (window.__splashT0 || 0)));
   setTimeout(() => {
     splash.classList.add("out");
     setTimeout(() => splash.remove(), 420);
@@ -1185,7 +1582,8 @@ function useData(d) {
   fillMarquee();
 }
 
-function boot(d) {
+// cached — данные уже были на устройстве: заставка короткая (DESIGN.md → «Экран запуска»)
+function boot(d, cached = false) {
   useData(d);
   const fromLink = startParam();
   const saved = lsGet(FAV_KEY);
@@ -1197,7 +1595,7 @@ function boot(d) {
     else rememberSplash(fav);
   }
   render();
-  hideSplash();
+  hideSplash(cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS);
   const mid = matchParam();
   if (mid && !state.openedFromLink && (games().some((g) => g.id === mid) || /^h\d+$/.test(mid))) {
     state.openedFromLink = true;
@@ -1211,8 +1609,9 @@ async function main() {
   initTelegram();   // если скрипт Telegram уже успел загрузиться
 
   const fresh = fetchData();
+  initSheetDrag();
   const cached = readCache();
-  if (cached) boot(cached);
+  if (cached) boot(cached, true);
   try {
     const d = await fresh;
     const changed = !cached || d.updated !== cached.updated;
