@@ -52,6 +52,14 @@ jobs:
           APP_LINK: ${{ vars.APP_LINK }}
         run: python build_data.py
 
+      # Pages отдаёт файлы с кэшем на 10 минут, а Telegram держит их ещё дольше. Метка версии в адресе
+      # заставляет взять свежие app.js и style.css вместе с новым index.html, иначе они расходятся
+      - name: Метка версии для кэша
+        run: |
+          v="${GITHUB_SHA::8}"
+          sed -i "s#href=\"style.css\"#href=\"style.css?v=$v\"#; s#src=\"app.js\"#src=\"app.js?v=$v\"#" webapp/index.html
+          grep -q "app.js?v=$v" webapp/index.html && grep -q "style.css?v=$v" webapp/index.html
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: webapp
