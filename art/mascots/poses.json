@@ -1,0 +1,21 @@
+{
+ "arktika": {"hello": "TL", "point": "TR", "cheer": "BR", "shrug": "BL"},
+ "dinamo-576": {"hello": "TR", "point": "TL", "cheer": "BL", "shrug": "BR"},
+ "dizelist": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "ekoniva-bobrov": {"hello": "BL", "point": "TR", "cheer": "TL", "shrug": "BR"},
+ "ermak": {"hello": "TR", "point": "TR mirror", "cheer": "BL", "shrug": "BR"},
+ "fakel-yamal": {"hello": "TR", "point": "TL mirror", "cheer": "BL", "shrug": "BR"},
+ "kaluga": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "krasnaya-mashina": {"hello": "TR", "point": "TL", "cheer": "BL", "shrug": "BR"},
+ "kristall": {"hello": "TL", "point": "TR", "cheer": "BR", "shrug": "BL"},
+ "leningradets": {"hello": "TL", "point": "TR mirror", "cheer": "BL", "shrug": "BR"},
+ "metallurg": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "polet": {"hello": "BL", "point": "TR mirror", "cheer": "BR", "shrug": "TL"},
+ "progress": {"hello": "BL", "point": "TR", "cheer": "TL", "shrug": "BR"},
+ "rostov": {"hello": "TR", "point": "TL", "cheer": "BL", "shrug": "BR"},
+ "ryazan-vdv": {"hello": "BL", "point": "TL", "cheer": "BR", "shrug": "TR"},
+ "samara": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "sokol": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "tambov": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"},
+ "vityaz-podolsk": {"hello": "TL", "point": "TR", "cheer": "BL", "shrug": "BR"}
+}

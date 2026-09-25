@@ -1,9 +1,11 @@
 """Проводники онбординга (ADR-011): листы Midjourney из art/mascots/ → webapp/mascots/<клуб>-<поза>.webp.
 
 Исходник — лист 2×2 `art/mascots/<клуб>.png`: один талисман в четырёх позах на сером фоне. По умолчанию
-слева вверху hello, справа вверху point, слева внизу cheer, справа внизу shrug. Midjourney перепутал
-места — настоящий порядок в art/mascots/order.json: {"<клуб>": ["cheer", "point", "hello", "shrug"]}
-(слева направо, сверху вниз). Можно положить и одну позу отдельно: `art/mascots/<клуб>-<поза>.png` —
+слева вверху hello, справа вверху point, слева внизу cheer, справа внизу shrug. Midjourney путает места
+и жесты, поэтому какая фигура листа идёт в какую позу — в art/mascots/poses.json:
+{"<клуб>": {"hello": "BL", "point": "TR mirror", ...}} — TL, TR, BL, BR: слева/справа, вверху/внизу;
+mirror — отзеркалить: в мини-аппе фигура стоит слева от облачка и показывать должна на него. Одна
+фигура может пойти в две позы. Можно положить и одну позу отдельно: `art/mascots/<клуб>-<поза>.png` —
 она заменит эту позу из листа.
 
 Фигуры не режем по четвертям: клюшки и руки заходят в соседние. Заливкой от краёв убираем серый фон
@@ -20,12 +22,13 @@ import sys
 from collections import deque
 from pathlib import Path
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 
 BASE = Path(__file__).resolve().parent.parent
 SRC = BASE / "art" / "mascots"
 OUT = BASE / "webapp" / "mascots"
-ORDER = SRC / "order.json"
+LAYOUT = SRC / "poses.json"
+GRID = ("TL", "TR", "BL", "BR")
 POSES = ("hello", "point", "cheer", "shrug")
 SIZE = 288      # в 3 раза больше самого крупного показа, 84×92 на экране выбора
 WORK = 512      # маску считаем на картинке не больше этого: быстро, а край сглаживает увеличение
@@ -196,7 +199,7 @@ def figures(im: Image.Image, n: int) -> tuple[list[Image.Image], list[str]]:
     return grid, notes
 
 
-def sticker(im: Image.Image, alpha: Image.Image, side: int, dest: Path) -> int:
+def sticker(im: Image.Image, alpha: Image.Image, side: int, mirror: bool, dest: Path) -> int:
     """Вырезать фигуру по маске и поставить в квадрат side×side (по центру, ногами на нижнее поле),
     сохранить SIZE×SIZE. side общий у всех поз клуба — талисман не меняет размер от позы к позе."""
     fig = im.convert("RGBA")
@@ -222,15 +225,17 @@ def sticker(im: Image.Image, alpha: Image.Image, side: int, dest: Path) -> int:
     sq = Image.alpha_composite(out, sq)
     # Уменьшаем с учётом прозрачности, иначе по краю вылезает цвет фона
     sq = sq.convert("RGBa").resize((SIZE, SIZE), Image.LANCZOS).convert("RGBA")
+    if mirror:
+        sq = ImageOps.mirror(sq)
     sq.save(dest, "WEBP", quality=88, method=6)
     return dest.stat().st_size
 
 
 def main() -> None:
     clubs = {t["id"] for t in json.loads((BASE / "teams.json").read_text(encoding="utf-8"))}
-    order = json.loads(ORDER.read_text(encoding="utf-8")) if ORDER.exists() else {}
+    layout = json.loads(LAYOUT.read_text(encoding="utf-8")) if LAYOUT.exists() else {}
     files = sorted(p for p in SRC.iterdir() if p.suffix.lower() in EXT)
-    jobs: dict[str, dict[str, tuple[Image.Image, Image.Image]]] = {}   # клуб → поза → (картинка, маска)
+    jobs: dict[str, dict[str, tuple]] = {}   # клуб → поза → (картинка, маска, отзеркалить)
     problems = []
     # Сначала листы, потом отдельные позы поверх них
     for path in sorted(files, key=lambda p: p.stem not in clubs):
@@ -247,25 +252,27 @@ def main() -> None:
             continue
         problems += [f"{path.name}: {note}" for note in dict.fromkeys(notes)]
         if single:
-            jobs.setdefault(club, {})[pose] = (im, masks[0])
+            jobs.setdefault(club, {})[pose] = (im, masks[0], False)
             continue
-        poses = order.get(path.stem, POSES)
-        if sorted(poses) != sorted(POSES):
-            sys.exit(f"order.json: у {path.stem} должны быть ровно позы {', '.join(POSES)}")
-        jobs.setdefault(path.stem, {}).update({p: (im, m) for p, m in zip(poses, masks)})
+        for pose, default in zip(POSES, GRID):
+            place, *flag = layout.get(path.stem, {}).get(pose, default).split()
+            if place not in GRID or flag not in ([], ["mirror"]):
+                sys.exit(f"poses.json: у {path.stem} {pose} — «{place} {' '.join(flag)}», ждал TL/TR/BL/BR и mirror")
+            jobs.setdefault(path.stem, {}).setdefault(pose, (im, masks[GRID.index(place)], bool(flag)))
     if not jobs:
         sys.exit(f"В {SRC.relative_to(BASE)} нет листов <клуб>.png")
 
     OUT.mkdir(parents=True, exist_ok=True)
     for club in sorted(jobs):
         line = []
-        boxes = [m.getbbox() for _, m in jobs[club].values()]
+        boxes = [m.getbbox() for _, m, _ in jobs[club].values()]
         side = round(max(max(b[2] - b[0], b[3] - b[1]) for b in boxes) * (1 + 2 * MARGIN))
         for pose in POSES:
             if pose not in jobs[club]:
                 problems.append(f"{club}: нет позы {pose}")
                 continue
-            size = sticker(*jobs[club][pose], side, OUT / f"{club}-{pose}.webp")
+            im, mask, mirror = jobs[club][pose]
+            size = sticker(im, mask, side, mirror, OUT / f"{club}-{pose}.webp")
             line.append(f"{pose} {size // 1024} КБ")
         print(f"{club:18} " + ", ".join(line))
     print(f"Клубов: {len(jobs)} → {OUT.relative_to(BASE)}")
