@@ -517,6 +517,7 @@ h1, .display {
 .fig .fg-mask { fill: #ffd731; stroke: #000; stroke-width: 1.2; }
 .fig .fg-visor { fill: #cfe6ff; stroke: #000; stroke-width: 1; }
 .fig .fg-stick { fill: none; stroke: #000; stroke-width: 2.4; stroke-linecap: round; }
+.fig .fg-eye { fill: #000; }
 .fig .fg-line, .fig .fg-cage { fill: none; stroke: #000; stroke-width: 1.1; stroke-linecap: round; }
 :root[data-theme="dark"] .fig .fg-bg { fill: #c9d8ea; }
 :root[data-theme="dark"] .fig.goalie .fg-bg { fill: #d6c6e6; }
