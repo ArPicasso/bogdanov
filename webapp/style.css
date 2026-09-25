@@ -592,11 +592,12 @@ h1, .display {
 .flow .fl-away { fill: var(--lead-away); }
 .flow .fl-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 .flow .fl-axis { stroke: var(--edge-strong); stroke-width: 1; }
-.flow .fl-grid { stroke: var(--mist); stroke-width: 1; stroke-dasharray: 3 3; }
+.flow .fl-band { fill: var(--mist); opacity: .5; }
+.flow .fl-grid { stroke: var(--edge-strong); stroke-width: 1; opacity: .35; }
 .flow .fl-lane { stroke: var(--mist); stroke-width: 1; }
 .flow .fl-pen { fill: var(--muted); }
 .flow .fl-ax { font: 700 9px var(--ui); letter-spacing: .04em; fill: var(--muted); }
-.flow .fl-per { font: 700 10px var(--ui); letter-spacing: .04em; fill: var(--muted); }
+.flow .fl-per { font: 700 10px var(--ui); letter-spacing: .04em; text-transform: uppercase; fill: var(--ink); }
 .flow .fl-dot { cursor: pointer; outline: none; }
 .flow .fl-dot .hit { fill: transparent; }
 .flow .fl-dot .v { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
