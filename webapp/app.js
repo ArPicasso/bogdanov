@@ -42,6 +42,7 @@ const state = {
   cal: { team: null, side: "all", conf: "all" },
   conf: "east",
   scrolledToNext: false,
+  h2h: null,        // история очных встреч (ADR-006): грузится при первом открытии карточки матча
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -557,6 +558,52 @@ function shareLink(link, text) {
   window.open(url, "_blank", "noopener");
 }
 
+// ---------- очные встречи (ADR-006) ----------
+
+let h2hLoading = null;
+function loadH2H() {
+  if (!h2hLoading) {
+    h2hLoading = fetch("data/h2h.json")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+      .then((d) => (state.h2h = d))
+      .catch(() => { h2hLoading = null; return null; });
+  }
+  return h2hLoading;
+}
+const pairKey = (a, b) => [a, b].sort().join("|");
+const shortDate = (iso) => { const d = parseISO(iso); return `${d.getUTCDate()} ${MON_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+
+// Вывод одной строкой. Прогноз не даём: только «по истории встреч»
+function h2hVerdict(h, a, b) {
+  const wa = h.wins[a], wb = h.wins[b];
+  if (h.games < 3) return `Встречались ${h.games} ${plural(h.games, "раз", "раза", "раз")} — по истории фаворита не назвать`;
+  if (wa === wb) return `История равная: по ${wa} ${plural(wa, "победе", "победы", "побед")}`;
+  const [fav, w] = wa > wb ? [a, wa] : [b, wb];
+  return `По истории встреч сильнее ${team(fav).name}: ${w} ${plural(w, "победа", "победы", "побед")} из ${h.games}`;
+}
+
+function h2hBlock(g) {
+  const h = state.h2h && state.h2h[pairKey(g.home, g.away)];
+  const label = (aside) => `<div class="label">Очные встречи${aside ? `<span class="aside">${aside}</span>` : ""}</div>`;
+  if (!h || !h.games) return `${label("")}<div class="empty">В НМХЛ и РХЛ раньше не встречались</div>`;
+  const a = g.home, b = g.away;
+  const share = Math.round((100 * h.wins[a]) / h.games);
+  let html = label(`${h.games} ${plural(h.games, "матч", "матча", "матчей")} с ${esc(h.since)} года`);
+  html += `<div class="h2h">
+    <div class="h2h-row"><span class="h2h-em">${emblem(a)}</span><b class="num">${h.wins[a]}</b><span>победы</span><b class="num">${h.wins[b]}</b><span class="h2h-em">${emblem(b)}</span></div>
+    <div class="h2h-bar" role="img" aria-label="Победы: ${esc(team(a).name)} ${h.wins[a]}, ${esc(team(b).name)} ${h.wins[b]}"><i style="width:${share}%"></i></div>
+    <div class="h2h-row goals-row"><span></span><b class="num">${h.goals[a]}</b><span>шайбы</span><b class="num">${h.goals[b]}</b><span></span></div>
+    <div class="h2h-verdict">${esc(h2hVerdict(h, a, b))}</div>
+  </div>`;
+  html += `<div class="label">Последние встречи</div><div class="list">${h.last.map((m) => {
+    const lead = (id) => (id === m.home ? m.score[0] > m.score[1] : m.score[1] > m.score[0]);
+    const line = (id, goals) => `<div>${emblem(id)}<span class="nm${lead(id) ? " me" : ""}">${esc(team(id).name)}</span><span class="gl${lead(id) ? " lead" : ""}">${goals}</span></div>`;
+    const dec = m.decision ? `<span class="res l">${esc(m.decision)}</span>` : "";
+    return `<div class="row two static"><div class="t">${line(m.home, m.score[0])}${line(m.away, m.score[1])}</div><div class="r">${dec}<span class="kick when">${esc(shortDate(m.date))}</span></div></div>`;
+  }).join("")}</div>`;
+  return html;
+}
+
 // ---------- карточка матча ----------
 
 let sheetOpener = null;   // куда вернуть фокус после закрытия карточки
@@ -588,6 +635,8 @@ function openMatch(id) {
     html += `</div>`;
   }
 
+  html += `<div id="h2h" data-pair="${esc(pairKey(g.home, g.away))}">${state.h2h ? h2hBlock(g) : ""}</div>`;
+
   html += `<div class="label">О матче</div><div class="facts-card"><dl class="facts">`;
   if (g.n) html += `<dt>Номер</dt><dd>№ ${esc(g.n)}</dd>`;
   html += `<dt>Город</dt><dd>${esc(team(g.home).city)}</dd>`;
@@ -598,6 +647,12 @@ function openMatch(id) {
   html += `</dl></div>`;
 
   showSheet(html);
+  if (!state.h2h) {
+    loadH2H().then(() => {
+      const box = $("#h2h");
+      if (state.h2h && box && !$("#sheet").hidden && box.dataset.pair === pairKey(g.home, g.away)) box.innerHTML = h2hBlock(g);
+    });
+  }
 }
 
 function showSheet(html) {

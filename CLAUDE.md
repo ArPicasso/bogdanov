@@ -27,12 +27,14 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `results.json` | Результаты: id турнира → номер матча `n` (как в `games.json`) → протокол. Не в git |
 | `tests/` | Тесты на `unittest`, фикстуры — реальные страницы сайта лиги |
 | `docs/adr/` | Архитектурные решения, по файлу на решение |
-| `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания |
+| `teams.json` | 26 команд лиги: конференция, город, id на r-hockey, варианты написания, прежние названия (`former`) |
 | `rhockey.py` | Календарь всей лиги с r-hockey.ru — временно, до открытия rhl.fhr.ru |
-| `build_data.py` | Собирает `webapp/data/league.json`: команды, матчи, результаты, таблица |
+| `build_data.py` | Собирает `webapp/data/league.json` (команды, матчи, результаты, таблица) и `h2h.json` |
+| `history.py` | Матчи пяти прошлых сезонов НМХЛ с сайта лиги → `history.json` для очных встреч (ADR-006) |
+| `history.json` | Прошлые сезоны, команды уже в id из `teams.json`. В git, пересобирается руками раз в сезон |
 | `webapp/` | Мини-апп: `index.html`, `style.css`, `app.js`, без сборки. Публикуется на GitHub Pages |
 | `webapp/brand/` | Иконка для экрана загрузки Telegram и фавиконки (`icon.svg`, `icon-512.png`) |
-| `webapp/logos/` | Эмблемы клубов, путь — поле `logo` в `teams.json` |
+| `webapp/logos/` | Эмблемы всех 26 клубов, 200×200 PNG с прозрачным фоном, путь — поле `logo` в `teams.json` |
 | `webapp/story.html`, `webapp/stories/` | Карточки клубов для Telegram Stories и их готовые картинки (ADR-004) |
 | `tools/render_stories.js` | Перерисовать `webapp/stories/` (Playwright, запускается руками) |
 | `stickers/` | Стикеры бота 512×512 и эмодзи `emoji/` 100×100, WEBP; исходник — `stickers.html` (ADR-005) |
@@ -55,7 +57,8 @@ venv/bin/pip install -r requirements.txt
 BOT_TOKEN=... venv/bin/python bot.py
 venv/bin/python -m unittest discover -s tests   # тесты
 venv/bin/python league.py                        # скачать протоколы в results.json
-venv/bin/python build_data.py                    # собрать webapp/data/league.json
+venv/bin/python history.py                       # прошлые сезоны в history.json (раз в сезон)
+venv/bin/python build_data.py                    # собрать webapp/data/league.json и h2h.json
 cd webapp && python3 -m http.server 8000         # мини-апп в браузере: localhost:8000
 ```
 
