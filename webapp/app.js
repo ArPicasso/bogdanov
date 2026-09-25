@@ -686,10 +686,14 @@ const LEAD_CATS = {
   sv_pct: { title: "Вратари", unit: "% отражённых", sub: (r) => `КН ${leadValue("gaa", r.gaa)} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
   pim: { title: "Штраф", unit: ["минута", "минуты", "минут"], sub: (r) => `${r.pts} ${plural(r.pts, "очко", "очка", "очков")} · ${r.gp} ${plural(r.gp, "игра", "игры", "игр")}` },
 };
-const LEAD_NOTE = {
-  pts: "Очки — голы плюс передачи.",
-  pm: "Плюс-минус — забитые минус пропущенные шайбы, пока игрок на льду; голы в большинстве не считаются.",
-  sv_pct: "КН — пропущено в среднем за 60 минут. Вратари с малым игровым временем в список лиги не входят.",
+// Что значит показатель — первым абзацем в листе топ-10: болельщик-новичок не обязан знать «+/−»
+const LEAD_ABOUT = {
+  pts: "Больше всех очков. Очко — это гол или результативная передача: 39+39 — 39 голов и 39 передач.",
+  g: "Больше всех забитых шайб. Буллиты в серии после овертайма не считаются.",
+  a: "Больше всех результативных передач — пасов, после которых забил партнёр. На один гол записывают до двух передач.",
+  pm: "Разница шайб, пока игрок на льду: забила его команда — плюс, пропустила — минус. Голы, забитые в большинстве, не считаются.",
+  sv_pct: "Доля отражённых бросков в створ. КН — сколько шайб вратарь пропускает в среднем за 60 минут: чем меньше, тем лучше. В список попадают вратари, отыгравшие достаточно времени.",
+  pim: "Больше всех штрафных минут: сколько игрок просидел на скамейке штрафников.",
 };
 
 let leadersLoading = null;
@@ -725,6 +729,14 @@ function leadUnit(cat, v) {
   return typeof u === "string" ? u : plural(Math.abs(v), ...u);
 }
 const clubOf = (r) => (r.team ? team(r.team).name : r.club || "");
+// Эмблема клуба игрока: нынешний клуб — как везде, клуб прошлых сезонов — из past_clubs.json
+function clubBadge(r, size) {
+  if (r.team) return emblem(r.team, size);
+  if (r.logo) return `<span class="em${size ? " " + size : ""}"><img src="${esc(r.logo)}" alt=""></span>`;
+  return "";
+}
+// Фигура с эмблемой клуба в углу — вместо фото игрока
+const playerSticker = (r, cls = "") => `<span class="ps ${cls}">${figure(r)}${clubBadge(r)}</span>`;
 // «Султанов Реваль» → фамилия крупно, имя мельче: в карточке лидера узко
 const splitName = (n) => { const i = n.indexOf(" "); return i < 0 ? [n, ""] : [n.slice(0, i), n.slice(i + 1)]; };
 
@@ -740,7 +752,7 @@ function leadCard(cat, r) {
   const [last, first] = splitName(r.name);
   return `<button type="button" class="lead-card${r.team && r.team === state.fav ? " me" : ""}" data-lead-open="${cat}" aria-label="${c.title}: топ-10">
     <span class="lc-cat">${c.title}</span>
-    ${r.team ? `<span class="lc-em">${emblem(r.team, "md")}</span>` : ""}
+    <span class="lc-em">${playerSticker(r, "lg")}</span>
     <span class="lc-val num">${leadValue(cat, r[cat])}</span>
     <span class="lc-unit">${esc(leadUnit(cat, r[cat]))}</span>
     <span class="lc-name"><b>${esc(last)}</b> ${esc(first)}</span>
@@ -754,17 +766,19 @@ const LEAD_BY = { pts: "по очкам", g: "по голам", a: "по пер�
 function mineBlock(d) {
   if (!state.fav) return "";
   const people = new Map();
+  const who = new Map();
   for (const cat of Object.keys(LEAD_CATS)) {
     const r = (d.categories[cat] || []).find((x) => x.team === state.fav);
     if (!r) continue;
     if (!people.has(r.name)) people.set(r.name, []);
     people.get(r.name).push([cat, r.rank]);
+    who.set(r.name, r);
   }
   if (!people.size) return "";
   const rows = [...people].map(([name, places]) => [name, places.sort((x, y) => x[1] - y[1])]).sort((x, y) => x[1][0][1] - y[1][0][1]);
   return `<div class="label">${esc(team(state.fav).name)} в лидерах</div><div class="list mine-leads">${rows.map(([name, places]) =>
     `<div class="row mine-row" data-lead-open="${places[0][0]}" role="button" tabindex="0">
-      <span class="ml-rank num">${places[0][1]}</span>
+      <span class="ps">${figure(who.get(name))}</span>
       <span class="ml-who"><b>${esc(name)}</b><small>${places.map(([cat, rank]) => `${rank}-й ${LEAD_BY[cat]}`).join(" · ")}</small></span>
     </div>`).join("")}</div>`;
 }
@@ -787,11 +801,32 @@ function leadersBody() {
   return html;
 }
 
+// Фигура игрока вместо фото (ADR-009): полевой — шлем с визором, вратарь — маска с решёткой.
+// Наклейка одинаковая в обеих темах, как эмблемы: чёрный контур, постоянные цвета стикеров
+function figure(r) {
+  const goalie = r.role === "G";
+  const num = r.number != null ? `<text x="24" y="44.2" class="fg-num">${esc(r.number)}</text>` : "";
+  const body = goalie
+    ? `<path class="fg-shirt" d="M1 49C2 36 10 31 24 31S46 36 47 49Z"/>
+       <path class="fg-line" d="M9 36.5c2.5 1.6 4 4.5 4.4 8M39 36.5c-2.5 1.6-4 4.5-4.4 8"/>
+       <path class="fg-mask" d="M15 21.5C15 13.8 19 10 24 10s9 3.8 9 11.5c0 6.3-4 10.5-9 10.5s-9-4.2-9-10.5Z"/>
+       <rect class="fg-face" x="18.4" y="18.6" width="11.2" height="9.6" rx="3.2"/>
+       <path class="fg-cage" d="M21.2 18.8v9.2M24 18.6v9.6M26.8 18.8v9.2M18.6 23.4h10.8"/>`
+    : `<path class="fg-stick" d="M41.5 5.5 35 30"/>
+       <path class="fg-shirt" d="M4 49C5 37.5 12 32.5 24 32.5S43 37.5 44 49Z"/>
+       <path class="fg-line" d="M19.5 32.8 24 37l4.5-4.2"/>
+       <circle class="fg-face" cx="24" cy="22" r="8.2"/>
+       <path class="fg-helmet" d="M15.6 22.4C15.3 15.2 19 11.6 24 11.6s8.7 3.6 8.4 10.8Z"/>
+       <path class="fg-visor" d="M16 21.8h16v1.6c0 1.2-1 2.2-2.2 2.2H18.2c-1.2 0-2.2-1-2.2-2.2Z"/>`;
+  return `<svg class="fig${goalie ? " goalie" : ""}" viewBox="0 0 48 48" aria-hidden="true"><circle class="fg-bg" cx="24" cy="24" r="24"/>
+    ${body}${num}<circle class="fg-ring" cx="24" cy="24" r="23.5"/></svg>`;
+}
+
 // Топ-10 показателя — в листе снизу, как карточка матча: одно число в строке, остальное — подписью
 function leaderRow(cat, r) {
   return `<div class="row lead-row${r.team && r.team === state.fav ? " me" : ""}">
     <span class="lr-rank num">${r.rank}</span>
-    ${r.team ? emblem(r.team) : '<span class="em blank" aria-hidden="true"></span>'}
+    ${playerSticker(r)}
     <span class="lr-who"><b>${esc(r.name)}</b><small>${esc(clubOf(r))} · ${esc(LEAD_CATS[cat].sub(r))}</small></span>
     <span class="lr-val num">${leadValue(cat, r[cat])}</span>
   </div>`;
@@ -808,10 +843,11 @@ function openLeaders(cat) {
     <div class="sheet-head"><span class="when">${esc(d.league)} ${esc(d.season)}${d.season !== state.data.season ? " · прошлый сезон" : ""}</span>
     <button class="btn-round" data-close aria-label="Закрыть">${ICON.close}</button></div>
     <h2 class="lead-title">${c.title}<span>топ-10</span></h2>
+    <p class="lead-about">${LEAD_ABOUT[cat]}</p>
     <div class="list">${top.map((r) => leaderRow(cat, r)).join("")}`;
   if (mine) html += `<div class="cut"><span>лучший в команде</span></div>${leaderRow(cat, mine)}`;
   html += `</div>`;
-  if (LEAD_NOTE[cat]) html += `<div class="foot">${LEAD_NOTE[cat]}</div>`;
+  html += `<div class="foot">Места — как в статистике на сайте лиги. Фото игроков не показываем: вместо них — фигура с номером.</div>`;
   showSheet(html);
 }
 
