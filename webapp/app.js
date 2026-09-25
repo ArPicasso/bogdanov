@@ -56,12 +56,51 @@ const EASE_IN = "cubic-bezier(.4, 0, 1, 1)";      // уход: с разгоно
 const calm = () => !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
 const nextFrame = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));   // после того, как кадр нарисован
 
-// Бегунок в сегментах и чипах: заливка выбранного перетекает к новой кнопке.
-// Группы с бегунком помечены data-run — по этому ключу бегунок узнаёт себя после перерисовки
+// Бегунок — заливка выбранного в меню, сегментах и чипах. Он из трёх частей (полукруг, середина,
+// полукруг) и двигается только transform: анимацию ведёт видеокарта, и она идёт ровно, даже пока
+// основной поток перерисовывает экран. Ширина — масштабом середины, полукруги не искажаются
+const RUN = '<i class="run" aria-hidden="true"><i class="l"></i><i class="m"></i><i class="r"></i></i>';
+const runs = new WeakMap();   // бегунок → { from, to, anims }: чтобы подхватить его на лету
+
+function runPose(r, cap) {
+  return [
+    `translateX(${r.x}px)`,
+    `translateX(${r.x + cap - 0.5}px) scaleX(${Math.max(1, r.w - 2 * cap + 1)})`,
+    `translateX(${r.x + r.w - cap}px)`,
+  ];
+}
+// Где бегунок сейчас, с учётом идущей анимации
+function runNow(run) {
+  const st = runs.get(run);
+  if (!st) return null;
+  const a = st.anims && st.anims[0];
+  if (!a || a.playState !== "running" || !st.from) return st.to;
+  const p = a.effect.getComputedTiming().progress || 0;
+  return { x: st.from.x + (st.to.x - st.from.x) * p, w: st.from.w + (st.to.w - st.from.w) * p };
+}
+function moveRun(run, to, animate, duration = 260) {
+  const cap = run.offsetHeight / 2;
+  const from = runNow(run);
+  const st = runs.get(run);
+  if (st && st.anims) st.anims.forEach((a) => a.cancel());
+  const parts = [...run.children];
+  const end = runPose(to, cap);
+  parts.forEach((el, i) => { el.style.transform = end[i]; });
+  const rec = { from, to, anims: null };
+  if (animate && from && !calm() && (Math.abs(from.x - to.x) > 0.5 || Math.abs(from.w - to.w) > 0.5)) {
+    const begin = runPose(from, cap);
+    rec.anims = parts.map((el, i) => el.animate([{ transform: begin[i] }, { transform: end[i] }], { duration, easing: EASE_OUT }));
+  }
+  runs.set(run, rec);
+}
+
+// Группы с бегунком помечены data-run — по этому ключу бегунок находит своё прежнее место,
+// когда группу перерисовали заново
 function runnerState(root) {
   const m = {};
   root.querySelectorAll("[data-run] > .run").forEach((r) => {
-    if (r.dataset.w) m[r.parentNode.dataset.run] = { x: +r.dataset.x, w: +r.dataset.w };
+    const now = runNow(r);
+    if (now) m[r.parentNode.dataset.run] = now;
   });
   return m;
 }
@@ -69,48 +108,40 @@ function placeRunner(group, from) {
   const run = group.querySelector(":scope > .run");
   const on = group.querySelector(":scope > button.on");
   if (!run || !on || !on.offsetWidth) return;
-  const to = { x: on.offsetLeft, w: on.offsetWidth };
-  Object.assign(run.dataset, { x: to.x, w: to.w });
-  run.style.transform = `translateX(${to.x}px)`;
-  run.style.width = `${to.w}px`;
+  if (from && !runs.has(run)) runs.set(run, { from: null, to: from, anims: null });
+  moveRun(run, { x: on.offsetLeft, w: on.offsetWidth }, !!from);
   group.classList.add("ready");
-  if (from && !calm() && (from.x !== to.x || from.w !== to.w)) {
-    run.animate([{ transform: `translateX(${from.x}px)`, width: `${from.w}px` }, { transform: `translateX(${to.x}px)`, width: `${to.w}px` }],
-      { duration: 260, easing: EASE_OUT });
-  }
 }
 function placeRunners(root, prev = {}) {
   root.querySelectorAll("[data-run]").forEach((g) => placeRunner(g, prev[g.dataset.run]));
 }
-const RUN = '<i class="run" aria-hidden="true"></i>';
 
-// Бегунок меню: вкладки плавно меняют ширину, и заливка едет за новой, пока та растёт
-let tabRun = null;
-let tabAnim = 0;
-function syncTabs(animate) {
+// Меню: ширина вкладок меняется сразу, а глаз видит плавное — бегунок едет, иконки съезжают
+// со старых мест (FLIP), подпись проявляется. Всё это transform и opacity
+function setTab(tab, animate) {
   const nav = $("#tabs");
-  const run = nav.querySelector(".run");
+  const btns = [...nav.querySelectorAll("button")];
+  const flip = animate && !calm() && !nav.hidden;
+  const before = flip ? btns.map((b) => b.querySelector("svg").getBoundingClientRect().left) : null;
+  btns.forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  if (nav.hidden) return;
   const on = nav.querySelector("button.active");
-  if (!run || !on || nav.hidden) return;
-  cancelAnimationFrame(tabAnim);
-  const set = (r) => {
-    tabRun = r;
-    run.style.transform = `translateX(${r.x}px)`;
-    run.style.width = `${r.w}px`;
-  };
-  const target = () => ({ x: on.offsetLeft, w: on.offsetWidth });
-  const from = tabRun;
+  moveRun(nav.querySelector(".run"), { x: on.offsetLeft, w: on.offsetWidth }, animate, 300);
   nav.classList.add("ready");
-  if (!animate || !from || calm()) return set(target());
-  const t0 = performance.now();
-  const step = (now) => {
-    const t = Math.min(1, (now - t0) / 280);
-    const e = 1 - Math.pow(1 - t, 3);
-    const to = target();
-    set({ x: from.x + (to.x - from.x) * e, w: from.w + (to.w - from.w) * e });
-    if (t < 1) tabAnim = requestAnimationFrame(step);
-  };
-  tabAnim = requestAnimationFrame(step);
+  if (!flip) return;
+  btns.forEach((b, i) => {
+    const svg = b.querySelector("svg");
+    svg.getAnimations().forEach((a) => a.cancel());
+    const dx = before[i] - svg.getBoundingClientRect().left;
+    if (Math.abs(dx) > 0.5) svg.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: 300, easing: EASE_OUT });
+  });
+  on.querySelector("span").animate([{ opacity: 0, transform: "translateX(-6px)" }, { opacity: 1, transform: "none" }],
+    { duration: 220, delay: 60, easing: EASE_OUT, fill: "backwards" });
 }
 
 // Цифры сезона на Главной досчитывают до значения — раз в день, не при каждой смене вкладки
@@ -310,7 +341,7 @@ function outcomeFor(g, me) {
 function emblem(id, size) {
   const t = team(id);
   const cls = `em${size ? " " + size : ""}`;
-  if (t.logo) return `<span class="${cls}"><img src="${esc(t.logo)}" alt="" loading="lazy" decoding="async"></span>`;
+  if (t.logo) return `<span class="${cls}"><img src="${esc(t.logo)}" alt=""></span>`;
   return `<span class="${cls} ab" aria-hidden="true">${esc(t.abbr)}</span>`;
 }
 
@@ -496,10 +527,13 @@ function filterbarInner() {
 // По ней браузер держит место под месяцы вне экрана (content-visibility)
 const MONTH_H = { label: 46, one: 65, two: 75, day: 31 };
 
-function calendarMonths(list) {
+// upto — месяц «ГГГГ-ММ», до которого включительно месяцы раскладываются сразу: выше видимого
+// места высота должна быть настоящей, иначе прокрутка вверх дёргается (style.css → .month)
+function calendarMonths(list, upto) {
   const teamId = state.cal.team;
   const nextId = (list.find(isUpcoming) || {}).id;
   const nextDay = nextId ? list.find((x) => x.id === nextId).date : null;
+  if (upto === undefined) upto = nextDay ? nextDay.slice(0, 7) : "";
   const byMonth = new Map();
   for (const g of list) {
     const m = g.date.slice(0, 7);
@@ -507,7 +541,7 @@ function calendarMonths(list) {
     byMonth.get(m).push(g);
   }
   let html = "";
-  for (const [, month] of byMonth) {
+  for (const [key, month] of byMonth) {
     const d = parseISO(month[0].date);
     const count = month.length;
     let body = "";
@@ -528,7 +562,7 @@ function calendarMonths(list) {
       body += leagueRow(g);
     }
     const h = MONTH_H.label + count * (teamId ? MONTH_H.one : MONTH_H.two) + days * MONTH_H.day;
-    html += `<section class="month" style="contain-intrinsic-size: auto ${h}px"><div class="label">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">${body}</div></section>`;
+    html += `<section class="month${key <= upto ? " open" : ""}" style="contain-intrinsic-size: auto ${h}px"><div class="label">${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}<span class="aside">${count} ${plural(count, "матч", "матча", "матчей")}</span></div><div class="list">${body}</div></section>`;
   }
   if (!list.length) html += `<div class="empty">Матчей нет</div>`;
   return html;
@@ -567,7 +601,8 @@ function refreshCalendar(keep) {
   const anchor = keep ? visibleDay() : null;
   nextFrame(() => {
     if (token !== calToken || state.tab !== "calendar") return;
-    $("#cal-list").innerHTML = calendarMonths(calendarList());
+    const list = calendarList();
+    $("#cal-list").innerHTML = calendarMonths(list, anchor ? anchor.date.slice(0, 7) : undefined);
     if (anchor) {
       const els = [...document.querySelectorAll("#cal-list [data-date]")];
       const el = els.find((x) => x.dataset.date >= anchor.date) || els[els.length - 1];
@@ -927,16 +962,14 @@ function flowChart(g, d) {
   const hasPens = d && d.penalties && d.penalties.length;
   return `<div class="label">Ход матча<span class="aside">разница в счёте</span></div>
   <div class="flow${draw ? " draw" : ""}">
-    <svg viewBox="0 0 ${W} ${lane.away + 30}" role="img" aria-label="Разница в счёте по ходу матча">
+    <div class="fl-plot">${draw ? `<i class="fl-cover" style="left:${((100 * x0) / W).toFixed(2)}%"></i>` : ""}<svg viewBox="0 0 ${W} ${lane.away + 30}" role="img" aria-label="Разница в счёте по ходу матча">
       <defs><clipPath id="fl-up"><rect x="0" y="0" width="${W}" height="${yc}"/></clipPath>
         <clipPath id="fl-dn"><rect x="0" y="${yc}" width="${W}" height="${W}"/></clipPath></defs>
       ${bands}${grid}
       <line x1="${x0}" x2="${x1}" y1="${yc}" y2="${yc}" class="fl-axis"/>
-      <g class="fl-reveal">
-        <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
-        <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
-        <path d="${line}" class="fl-line"/>
-      </g>
+      <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
+      <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
+      <path d="${line}" class="fl-line"/>
       <text class="fl-ax" x="${x0 - 6}" y="${Y(up) + 3}" text-anchor="end">+${up}</text>
       <text class="fl-ax" x="${x0 - 6}" y="${yc + 3}" text-anchor="end">0</text>
       <text class="fl-ax" x="${x0 - 6}" y="${Y(-dn) + 3}" text-anchor="end">−${dn}</text>
@@ -946,8 +979,8 @@ function flowChart(g, d) {
       <text class="fl-ax" x="${x0 - 6}" y="${lane.away + 3}" text-anchor="end">${aAbbr}</text>
       <line x1="${x0}" x2="${x1}" y1="${lane.home}" y2="${lane.home}" class="fl-lane"/>
       <line x1="${x0}" x2="${x1}" y1="${lane.away}" y2="${lane.away}" class="fl-lane"/>` : ""}
-      <g class="fl-reveal">${pens}</g>${plabels}${dotEls}
-    </svg>
+      ${pens}${plabels}${dotEls}
+    </svg></div>
     <div class="flow-cap" aria-live="polite">
       <div class="tm num">${esc(cur.time)}</div>${emblem(sideTeam(g, cur.team))}
       <div class="who">${esc(cur.author)}${strengthTag(cur, cur.i ?? g.goals.indexOf(cur), d)}<small>${cur.assists.length ? cur.assists.map(esc).join(", ") : "без передач"}</small></div>
@@ -1308,16 +1341,12 @@ function render(dir = 0) {
     addThemeToggle();
     return;
   }
-  document.querySelectorAll("#tabs button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.tab === state.tab);
-    if (b.dataset.tab === state.tab) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  });
+  const cur = $("#tabs button.active");
+  if (!cur || cur.dataset.tab !== state.tab || !$("#tabs").classList.contains("ready")) setTab(state.tab, false);
   const views = { home: renderHome, calendar: renderCalendar, table: renderTable, me: renderMe };
   screen.innerHTML = views[state.tab]();
   addThemeToggle();
   placeRunners(screen);
-  syncTabs(!!dir);
   const anchor = state.tab === "calendar" && !state.scrolledToNext && $("#next-anchor");
   if (anchor) {
     anchor.scrollIntoView({ block: "center" });
@@ -1341,6 +1370,9 @@ function haptic() {
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
 }
 
+// Меню отвечает сразу: бегунок поехал в этом же кадре, а тяжёлая перерисовка экрана — в следующем,
+// когда анимация уже идёт на видеокарте и её не остановить занятым основным потоком
+let goToken = 0;
 function go(tab) {
   if (tab === state.tab) return;
   const dir = tabDir(state.tab, tab);
@@ -1348,7 +1380,9 @@ function go(tab) {
   state.draft = null;
   if (tab === "calendar") state.scrolledToNext = false;
   haptic();
-  render(dir);
+  setTab(tab, true);
+  const token = ++goToken;
+  nextFrame(() => { if (token === goToken) render(dir); });
 }
 
 function confirmTeam(id = state.draft || state.fav) {
@@ -1484,7 +1518,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
 
 // Бегунки держатся за свои кнопки, когда меняется ширина экрана или догрузился шрифт
 function resyncRunners() {
-  syncTabs(false);
+  if (state.fav) setTab(state.tab, false);
   placeRunners(document.body);
 }
 window.addEventListener("resize", resyncRunners);
@@ -1575,11 +1609,26 @@ async function fetchData() {
   return r.json();
 }
 
+// Эмблемы декодируются заранее и держатся в памяти: при перерисовке экрана картинка встаёт
+// в том же кадре, что и строка, а не мигает пустым кругом
+const warmed = [];
+function warmLogos() {
+  if (warmed.length) return;
+  const logos = [...new Set(state.data.teams.map((t) => t.logo).filter(Boolean))];
+  (window.requestIdleCallback || setTimeout)(() => logos.forEach((src) => {
+    const img = new Image();
+    img.src = src;
+    if (img.decode) img.decode().catch(() => {});
+    warmed.push(img);
+  }), { timeout: 1500 });
+}
+
 function useData(d) {
   state.data = d;
   state.teams = {};
   d.teams.forEach((t) => { state.teams[t.id] = t; });
   fillMarquee();
+  warmLogos();
 }
 
 // cached — данные уже были на устройстве: заставка короткая (DESIGN.md → «Экран запуска»)

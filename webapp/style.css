@@ -387,11 +387,21 @@ h1, .display {
 .seg button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg .chev { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .seg .on { background: var(--act); color: var(--on-act); }
-/* Бегунок: заливка выбранного — отдельный слой, app.js двигает его к новому сегменту.
-   Пока бегунок не поставлен (.ready нет), заливка остаётся на самой кнопке */
-.seg .run, .chips .run { position: absolute; left: 0; width: 0; border-radius: 9999px; pointer-events: none; }
-.seg .run { top: 3px; bottom: 3px; background: var(--act); }
-.chips .run { top: 0; bottom: 0; background: var(--paper); box-shadow: inset 0 0 0 1px var(--edge); }
+/* Бегунок: заливка выбранного — отдельный слой, app.js двигает его к новой кнопке.
+   Он из трёх частей — два полукруга и середина — и двигается только transform: анимацию ведёт
+   видеокарта, она не ждёт, пока основной поток перерисует список. Ширина меняется масштабом
+   середины, полукруги не искажаются. Пока бегунок не поставлен (.ready нет), заливка — на кнопке */
+.run { position: absolute; left: 0; right: 0; pointer-events: none; visibility: hidden; }
+.ready > .run { visibility: visible; }
+.run > i {
+  position: absolute; top: 0; bottom: 0; left: 0; width: var(--cap);
+  background: var(--run-bg); border: 1px solid var(--run-edge); transform-origin: 0 0;
+}
+.run > .l { border-right: 0; border-radius: 9999px 0 0 9999px; }
+.run > .r { border-left: 0; border-radius: 0 9999px 9999px 0; }
+.run > .m { width: 1px; border-left: 0; border-right: 0; }
+.seg .run { top: 3px; bottom: 3px; --cap: 17px; --run-bg: var(--act); --run-edge: var(--act); }
+.chips .run { top: 0; bottom: 0; --cap: 16px; --run-bg: var(--paper); --run-edge: var(--edge); }
 .seg.ready .on { background: none; }
 .chips.ready .on { background: none; border-color: transparent; }
 .seg button, .chips button { transition: color .2s, background-color .12s; }
@@ -532,12 +542,12 @@ h1, .display {
   background: var(--paper);
   z-index: 5;
 }
-.tabs .run { position: absolute; top: 6px; bottom: 6px; left: 0; width: 0; border-radius: 9999px; background: var(--act); pointer-events: none; }
+.tabs .run { top: 6px; bottom: 6px; --cap: 23px; --run-bg: var(--act); --run-edge: var(--act); }
 .tabs button {
   position: relative;
   z-index: 1;
   flex: 1;
-  min-width: 0;        /* ширину задаёт только flex: подпись, пока растёт, вкладку не распирает */
+  min-width: 0;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -549,22 +559,15 @@ h1, .display {
   font: 700 13px/1 var(--ui);
   letter-spacing: .03em;
   cursor: pointer;
-  transition: flex-grow .28s cubic-bezier(.2, .8, .2, 1), color .2s;
+  transition: color .2s;
 }
-/* Подпись не выключается, а схлопывается: проявляется, пока вкладка растёт */
-.tabs button span {
-  display: inline-block;
-  max-width: 0;
-  margin-left: -6px;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 0;
-  transition: max-width .28s cubic-bezier(.2, .8, .2, 1), margin-left .28s cubic-bezier(.2, .8, .2, 1), opacity .12s;
-}
+/* Ширина вкладок меняется сразу, без перехода: плавность дают бегунок, иконки и подпись,
+   которые app.js ведёт одними transform и opacity (FLIP) */
+.tabs button span { display: none; white-space: nowrap; }
 .tabs svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .tabs button.active { flex: 1.8; color: var(--on-act); }
 .tabs:not(.ready) button.active { background: var(--act); }
-.tabs button.active span { max-width: 96px; margin-left: 0; opacity: 1; transition: max-width .28s cubic-bezier(.2, .8, .2, 1), margin-left .28s cubic-bezier(.2, .8, .2, 1), opacity .2s .08s; }
+.tabs button.active span { display: inline; }
 .tabs svg { transition: transform .12s; }
 .tabs button:not(.active):active svg { transform: scale(.88); }
 
@@ -725,7 +728,9 @@ h1, .display {
 :root[data-theme="dark"] .seg:not(.ready) .on,
 :root[data-theme="dark"] .cmp-bar i.w { background: rgba(77, 162, 255, .16); color: #9ccbff; border-color: rgba(77, 162, 255, .45); }
 :root[data-theme="dark"] .seg .on { color: #9ccbff; }
-:root[data-theme="dark"] .seg .run { background: rgba(77, 162, 255, .16); box-shadow: inset 0 0 0 1px rgba(77, 162, 255, .45); }
+/* бегунок из частей — только сплошные цвета: полупрозрачные дали бы полосы на стыках.
+   Это те же 16% и 45% синего, смешанные с --paper */
+:root[data-theme="dark"] .seg .run { --run-bg: #22364e; --run-edge: #315b8b; }
 :root[data-theme="dark"] { --emblem-bg: #dde1e8; }
 
 /* ---------- переключатель темы ---------- */
@@ -864,6 +869,8 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
 .board-card.tap:active { transform: scale(.985); }
 .row, .st-row, .menu-row { transition: background-color .12s; }
 .st-row:not(.head):active, .seg button:not(.on):active, .chips button:not(.on):active { background: var(--sel); }
+/* В прокручиваемом нажатие проявляется через 60 мс: если палец начал прокрутку, строка не мигает */
+:is(.row, .st-row, .menu-row, .board-card.tap, .pick, .pills button):active { transition-delay: 60ms; }
 
 /* Наведение — только там, где есть мышь, иначе на телефоне подсветка залипает */
 @media (hover: hover) and (pointer: fine) {
@@ -886,18 +893,22 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
   font: 700 13px/1 var(--ui); letter-spacing: .03em; cursor: pointer;
 }
 
-/* Ход матча при первом показе рисуется слева направо, точки голов выскакивают по порядку */
-.flow.draw .fl-reveal { animation: fl-reveal .6s cubic-bezier(.3, .7, .2, 1) both; }
+/* Ход матча при первом показе рисуется слева направо: шторка цвета листа сжимается к правому
+   краю (transform — на видеокарте), точки голов выскакивают, когда до них дошла линия */
+.fl-plot { position: relative; }
+.fl-cover { position: absolute; top: 0; bottom: 0; right: -2px; background: var(--paper); transform: scaleX(0); transform-origin: 100% 0; pointer-events: none; }
+.flow.draw .fl-cover { animation: fl-cover .6s cubic-bezier(.3, .7, .2, 1) both; }
+@keyframes fl-cover { from { transform: scaleX(1); } }
 .flow.draw .fl-dot .v { transform-box: fill-box; transform-origin: center; animation: fl-pop .32s cubic-bezier(.2, 1.6, .4, 1) var(--d, 0ms) both; }
-@keyframes fl-reveal { from { clip-path: inset(-20px 100% -20px -20px); } to { clip-path: inset(-20px -20px -20px -20px); } }
 @keyframes fl-pop { from { transform: scale(0); } }
 
-/* Календарь: месяцы вне экрана не раскладываются, высоту до показа подсказывает app.js */
-.month { content-visibility: auto; }
+/* Календарь: месяцы ниже видимого не раскладываются, пока до них не долистали. Месяцы выше
+   раскладываются всегда (.open): их высота, угаданная неточно, сдвигала бы экран при прокрутке вверх */
+.month:not(.open) { content-visibility: auto; }
 
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tabs button, .tabs button span, .pick, .pick .em, .cta-bar, .pills button, .seg button, .chips button { transition: none; }
-  .pick.pop, .sk, .row.busy, .flow.draw .fl-reveal, .flow.draw .fl-dot .v { animation: none; }
+  .tabs button, .pick, .pick .em, .cta-bar, .pills button, .seg button, .chips button { transition: none; }
+  .pick.pop, .sk, .row.busy, .flow.draw .fl-cover, .flow.draw .fl-dot .v { animation: none; }
 }
