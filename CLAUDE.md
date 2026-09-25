@@ -20,7 +20,7 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 
 | Файл | Что это |
 | --- | --- |
-| `bot.py` | Вся логика: хендлеры, форматирование, `reminder_loop` |
+| `bot.py` | Вся логика: онбординг `/start`, хендлеры, форматирование, `reminder_loop` |
 | `games.json` | Календарь сезона, 48 игр. Правится руками |
 | `subscribers.json` | Подписчики на напоминания. Не в git |
 | `league.py` | Загрузка и разбор протоколов матчей с сайта лиги → `results.json` (ADR-001) |
@@ -35,6 +35,10 @@ https://claude.ai/code/artifact/b73460ae-abd0-4c96-9670-c62615e1ffa5
 | `webapp/logos/` | Эмблемы клубов, путь — поле `logo` в `teams.json` |
 | `webapp/story.html`, `webapp/stories/` | Карточки клубов для Telegram Stories и их готовые картинки (ADR-004) |
 | `tools/render_stories.js` | Перерисовать `webapp/stories/` (Playwright, запускается руками) |
+| `stickers/` | Стикеры бота 512×512 и эмодзи `emoji/` 100×100, WEBP; исходник — `stickers.html` (ADR-005) |
+| `tools/render_stickers.js` | Перерисовать стикеры и эмодзи (Playwright, запускается руками) |
+| `tools/upload_emoji.py` | Опубликовать эмодзи набором `t.me/addemoji/rhl_u21_by_<бот>` |
+| `.claude/agents/bot-logic.md` | Агент для логики бота: онбординг, хендлеры, напоминания |
 | `calendar.pdf` | Календарь на печать, отдаётся по кнопке |
 | `docs/research/` | Результаты разведки: источники данных, аудитория, письмо клубу |
 
