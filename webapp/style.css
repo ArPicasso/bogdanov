@@ -563,7 +563,13 @@ h1, .display {
 }
 .btn-round svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 
-.goals { border: var(--line); border-radius: 20px; overflow: hidden; }
+/* Длинные списки в листе — без overflow: hidden. iOS при прокрутке листа с прилипшими вкладками
+   теряет куски скруглённого слоя с обрезкой (пустая «дырка»). Углы скругляем у крайних строк */
+.goals, .roster, .sheet .list { overflow: visible; }
+.goals > :first-child, .roster > :first-child, .sheet .list > :first-child { border-radius: 19px 19px 0 0; }
+.goals > :last-child, .roster > :last-child, .sheet .list > :last-child { border-radius: 0 0 19px 19px; }
+.goals > :only-child, .roster > :only-child, .sheet .list > :only-child { border-radius: 19px; }
+.goals { border: var(--line); border-radius: 20px; }
 .period { padding: 10px 12px 4px; }
 .period .tag { height: 22px; font-size: 10px; background: var(--away-bg); color: var(--away-fg); border-color: var(--away-edge); }
 .goal { display: grid; grid-template-columns: 42px 24px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; }
@@ -621,7 +627,7 @@ h1, .display {
 .legend .k-pen { width: 14px; height: 6px; border-radius: 3px; background: var(--muted); }
 
 /* Вкладки разбора прилипают к верху карточки, пока листаешь голы и составы */
-.recap-seg { position: sticky; top: -10px; z-index: 2; margin-top: 24px; }
+.recap-seg { position: sticky; top: -10px; z-index: 2; margin-top: 24px; transform: translateZ(0); }
 .recap-seg button { height: 38px; }
 .recap-body > .chips { margin: 14px 0 10px; }
 .recap-body > .goals, .recap-body > .cmp-head { margin-top: 14px; }
@@ -646,7 +652,7 @@ h1, .display {
 .gk-row .nm small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
 .gk-row .pc { font: 800 18px/1 var(--display); }
 
-.roster { border: var(--line); border-radius: 20px; overflow: hidden; }
+.roster { border: var(--line); border-radius: 20px; }
 .roster .grp { padding: 10px 14px 4px; font: 700 11px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .roster .pl { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; padding: 9px 14px; }
 .roster .pl + .pl { border-top: 1px solid var(--mist); }
