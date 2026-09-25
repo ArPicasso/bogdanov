@@ -52,6 +52,12 @@ class TeamNames(unittest.TestCase):
     def test_every_rhockey_id_is_known(self):
         self.assertEqual(len(self.teams.by_rh), 26)
 
+    def test_logo_files_exist(self):
+        webapp = Path(__file__).parent.parent / "webapp"
+        for t in self.teams.all:
+            if "logo" in t:
+                self.assertTrue((webapp / t["logo"]).is_file(), t["logo"])
+
 
 class Calendar(unittest.TestCase):
     teams = b.load_teams()
