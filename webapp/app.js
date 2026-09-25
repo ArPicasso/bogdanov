@@ -220,8 +220,9 @@ function board(g) {
   const side = (id) => `<div class="side">${emblem(id, "lg")}<div class="name">${esc(team(id).name)}</div><div class="city">${esc(team(id).city)}</div></div>`;
   let mid;
   if (g.score) {
-    const dec = g.score.decision === "ОТ" ? "овертайм" : g.score.decision === "Б" ? "буллиты" : "финал";
-    mid = `<div class="score">${g.score.home}:${g.score.away}<span class="dec">${dec}</span></div>`;
+    // в основное время подписи нет: счёт сам говорит, что матч сыгран
+    const dec = { "ОТ": "овертайм", "Б": "буллиты" }[g.score.decision];
+    mid = `<div class="score">${g.score.home}:${g.score.away}${dec ? `<span class="dec">${dec}</span>` : ""}</div>`;
   } else {
     mid = `<div class="score pending">${g.time ? esc(g.time) : "vs"}<span class="dec">${until(g.date)}</span></div>`;
   }
@@ -671,11 +672,14 @@ function flowChart(g, d) {
   const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
   const area = `${line} L${X(length * 60).toFixed(1)} ${yc} Z`;
 
-  const marks = [1200, 2400, 3600].filter((t) => t < length * 60);
-  const grid = marks.map((t) => `<line x1="${X(t)}" x2="${X(t)}" y1="${Y(up) - 4}" y2="${lane.away + 8}" class="fl-grid"/>`).join("");
-  const periods = [["1-й", 600], ["2-й", 1800], ["3-й", 3000]];
-  if (length > 60) periods.push(["ОТ", 3600 + (length - 60) * 30]);
-  const plabels = periods.map(([l, t]) => `<text class="fl-per" x="${X(t)}" y="${lane.away + 22}" text-anchor="middle">${l}</text>`).join("");
+  // Периоды — колонки: чётные подложены тоном, границы сплошные, подпись внизу колонки
+  const periods = [["1-й период", 0, 1200], ["2-й период", 1200, 2400], ["3-й период", 2400, 3600]];
+  if (length > 60) periods.push(["ОТ", 3600, length * 60]);
+  const top = Y(up) - 10, bottom = lane.away + 30;
+  const bands = periods.map(([, a, b], i) => (i % 2
+    ? `<rect x="${X(a).toFixed(1)}" y="${top}" width="${(X(b) - X(a)).toFixed(1)}" height="${bottom - top}" class="fl-band"/>` : "")).join("");
+  const grid = periods.slice(1).map(([, a]) => `<line x1="${X(a)}" x2="${X(a)}" y1="${top}" y2="${bottom}" class="fl-grid"/>`).join("");
+  const plabels = periods.map(([l, a, b]) => `<text class="fl-per" x="${((X(a) + X(b)) / 2).toFixed(1)}" y="${lane.away + 23}" text-anchor="middle">${X(b) - X(a) < 60 ? l.replace(" период", "") : l}</text>`).join("");
 
   // удаление на 2/4/5 минут — полоса до конца штрафа или до гола в большинстве; остальные — точка
   const pens = ((d && d.penalties) || []).map((p) => {
@@ -699,10 +703,10 @@ function flowChart(g, d) {
   const hasPens = d && d.penalties && d.penalties.length;
   return `<div class="label">Ход матча<span class="aside">разница в счёте</span></div>
   <div class="flow">
-    <svg viewBox="0 0 ${W} ${lane.away + 28}" role="img" aria-label="Разница в счёте по ходу матча">
+    <svg viewBox="0 0 ${W} ${lane.away + 30}" role="img" aria-label="Разница в счёте по ходу матча">
       <defs><clipPath id="fl-up"><rect x="0" y="0" width="${W}" height="${yc}"/></clipPath>
         <clipPath id="fl-dn"><rect x="0" y="${yc}" width="${W}" height="${W}"/></clipPath></defs>
-      ${grid}
+      ${bands}${grid}
       <path d="${area}" class="fl-home" clip-path="url(#fl-up)"/>
       <path d="${area}" class="fl-away" clip-path="url(#fl-dn)"/>
       <line x1="${x0}" x2="${x1}" y1="${yc}" y2="${yc}" class="fl-axis"/>
