@@ -1,11 +1,13 @@
-"""Бот расписания МХК «Рязань-ВДВ», РХЛ 2026/27 (aiogram 3)."""
+"""Бот РХЛ U21 2026/27: встречает и ведёт в мини-апп, напоминает о матчах «Рязань-ВДВ» (aiogram 3)."""
 import asyncio
+import html
 import json
 import logging
 import os
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
@@ -20,6 +22,7 @@ from aiogram.types import (BotCommand, CallbackQuery, FSInputFile, InlineKeyboar
 BASE = Path(__file__).parent
 TZ = ZoneInfo("Europe/Moscow")
 SUBS_FILE = BASE / "subscribers.json"
+STICKERS = BASE / "stickers"          # стикеры бота (ADR-005), 512×512 WEBP
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")   # мини-апп (ADR-003); пусто — бот без кнопки
 REMIND_TODAY_AT = time(10, 0)      # утром в день игры
 REMIND_TOMORROW_AT = time(19, 0)   # вечером накануне
@@ -45,6 +48,8 @@ GAMES = sorted(
     key=lambda g: g.d,
 )
 OPPONENTS = sorted({g.opponent for g in GAMES})
+# id команды → название: для диплинка /start <id> (ADR-005)
+TEAMS = {t["id"]: t["name"] for t in json.loads((BASE / "teams.json").read_text(encoding="utf-8"))}
 MONTH_KEYS = sorted({(g.d.year, g.d.month) for g in GAMES})
 
 PLAYOFF = (
@@ -145,9 +150,21 @@ SUBS = load_subs()
 B_NEXT, B_SOON, B_MONTH, B_OPP = "🏒 Следующая игра", "📅 Ближайшие 5", "🗓 По месяцам", "🆚 Соперники"
 B_HOME, B_AWAY, B_ALL, B_PO = "🏠 Дома", "✈️ Выезд", "📋 Весь сезон", "🏆 Плей-офф"
 B_REMIND, B_PDF = "🔔 Напоминания", "📄 PDF"
+B_APP = "🏒 Открыть РХЛ"
 
+
+def app_url(team: str | None = None) -> str:
+    """Адрес мини-аппа; с командой — ?team=<id>, мини-апп выберет её, если своей ещё нет."""
+    if not team:
+        return WEBAPP_URL
+    u = urlsplit(WEBAPP_URL)
+    return urlunsplit(u._replace(query=urlencode(parse_qsl(u.query) + [("team", team)])))
+
+
+# первая строка — мини-апп (ADR-005), ниже — расписание «Рязань-ВДВ»
 MAIN_KB = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=B_NEXT), KeyboardButton(text=B_SOON)],
+    keyboard=([[KeyboardButton(text=B_APP, web_app=WebAppInfo(url=WEBAPP_URL))]] if WEBAPP_URL else []) +
+             [[KeyboardButton(text=B_NEXT), KeyboardButton(text=B_SOON)],
               [KeyboardButton(text=B_MONTH), KeyboardButton(text=B_OPP)],
               [KeyboardButton(text=B_HOME), KeyboardButton(text=B_AWAY)],
               [KeyboardButton(text=B_ALL), KeyboardButton(text=B_PO)],
@@ -173,11 +190,52 @@ def remind_kb(chat_id: int) -> InlineKeyboardMarkup:
         text="🔕 Выключить" if on else "🔔 Включить", callback_data="r:toggle")]])
 
 
+def app_kb(team: str | None = None, remind: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=B_APP, web_app=WebAppInfo(url=app_url(team)))]]
+    if remind:
+        rows.append([InlineKeyboardButton(text="🔔 Напоминания о матчах", callback_data="r:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def welcome_text(team: str | None = None) -> str:
+    head = (f"Здарова! Открываю РХЛ с командой <b>«{html.escape(TEAMS[team])}»</b> 🏒" if team
+            else "Здарова! Это РХЛ U21 — всё про лигу в одном месте 🏒")
+    return (f"{head}\n\n"
+            "Календарь 26 команд, таблица и счёт матчей — в приложении.\n\n"
+            "<b>Жми «Открыть РХЛ»</b> 👇 и выбери, за кого болеешь.")
+
+
+LOST_TEXT = "Всё самое интересное — в приложении. Жми кнопку 👇"
+# видно в пустом чате до «Старт» и в профиле бота (до 512 и 120 символов)
+DESCRIPTION = ("Бот Первенства России U21 — РХЛ 2026/27.\n\n"
+               "🏒 Календарь всех 26 команд, таблица и счёт матчей — в приложении\n"
+               "🔔 Напоминания перед играми\n\n"
+               "Жми «Старт» 👇")
+SHORT_DESCRIPTION = "РХЛ U21: календарь, таблица и счёт матчей. Напомню перед игрой 🏒"
+
+
 def remind_text(chat_id: int) -> str:
     state = "✅ включены" if chat_id in SUBS else "❌ выключены"
     return (f"🔔 Напоминания {state}\n\n"
             f"Пришлю сообщение накануне игры в {REMIND_TOMORROW_AT:%H:%M} "
             f"и в день игры в {REMIND_TODAY_AT:%H:%M} (МСК).")
+
+# ---------- стикеры ----------
+
+_sticker_ids: dict[str, str] = {}   # имя → file_id: файл загружаем один раз
+
+
+async def send_sticker(bot: Bot, chat_id: int, name: str, **kw) -> bool:
+    """Стикер — украшение (ADR-005): ошибка не мешает сообщению, кроме блокировки бота."""
+    try:
+        msg = await bot.send_sticker(chat_id, _sticker_ids.get(name) or FSInputFile(STICKERS / f"{name}.webp"), **kw)
+    except TelegramForbiddenError:
+        raise
+    except Exception:
+        logging.exception("sticker %s failed", name)
+        return False
+    _sticker_ids[name] = msg.sticker.file_id
+    return True
 
 # ---------- хендлеры ----------
 
@@ -197,12 +255,15 @@ async def start(m: Message, command: CommandObject):
         await m.answer(remind_text(m.chat.id), reply_markup=remind_kb(m.chat.id))
         await m.answer("Кнопки расписания — внизу.", reply_markup=MAIN_KB)
         return
-    await m.answer("Расписание МХК «Рязань-ВДВ», РХЛ 2026/27 🏒\nЖми кнопки внизу.\n\n"
-                   + next_game_text(), reply_markup=MAIN_KB)
-    if WEBAPP_URL:
-        await m.answer("Календарь всей лиги, таблица и карточки матчей — в приложении:",
-                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-                           text="📱 Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))]]))
+    if not WEBAPP_URL:
+        await m.answer("Расписание МХК «Рязань-ВДВ», РХЛ 2026/27 🏒\nЖми кнопки внизу.\n\n"
+                       + next_game_text(), reply_markup=MAIN_KB)
+        return
+    # ADR-005: стикер ставит клавиатуру, следующее сообщение ведёт к одной кнопке
+    if not await send_sticker(m.bot, m.chat.id, "hello", reply_markup=MAIN_KB):
+        await m.answer("Кнопка приложения — всегда внизу.", reply_markup=MAIN_KB)
+    team = command.args if command.args in TEAMS else None
+    await m.answer(welcome_text(team), reply_markup=app_kb(team, remind=True))
 
 
 @dp.message(Command("next"))
@@ -271,6 +332,12 @@ async def h_remind(m: Message):
     await m.answer(remind_text(m.chat.id), reply_markup=remind_kb(m.chat.id))
 
 
+@dp.callback_query(F.data == "r:open")
+async def cb_remind_open(c: CallbackQuery):
+    await c.message.answer(remind_text(c.message.chat.id), reply_markup=remind_kb(c.message.chat.id))
+    await c.answer()
+
+
 @dp.callback_query(F.data == "r:toggle")
 async def cb_remind(c: CallbackQuery):
     cid = c.message.chat.id
@@ -278,12 +345,23 @@ async def cb_remind(c: CallbackQuery):
     save_subs(SUBS)
     await safe_edit(c, remind_text(cid), remind_kb(cid))
     await c.answer("Готово")
+    if cid in SUBS:
+        await send_sticker(c.bot, cid, "bell")
 
 
 @dp.message(Command("pdf"))
 @dp.message(F.text == B_PDF)
 async def h_pdf(m: Message):
     await m.answer_document(FSInputFile(BASE / "calendar.pdf"), caption="Календарь на печать")
+
+
+@dp.message()   # последним: всё, что не поймали хендлеры выше (ADR-005 — бот не молчит)
+async def h_lost(m: Message):
+    if not WEBAPP_URL:
+        await m.answer("Не понял 🤔 Жми кнопки внизу.", reply_markup=MAIN_KB)
+        return
+    await send_sticker(m.bot, m.chat.id, "tap")
+    await m.answer(LOST_TEXT, reply_markup=app_kb())
 
 # ---------- напоминания ----------
 
@@ -307,6 +385,8 @@ async def reminder_loop(bot: Bot):
         text = f"🔔 <b>{head}</b>\n\n{fmt(g, show_past=False)}\n" + ("🏠 Дома" if g.home else "✈️ На выезде")
         for cid in list(SUBS):
             try:
+                if kind == "today":
+                    await send_sticker(bot, cid, "gameday")
                 await bot.send_message(cid, text)
             except TelegramForbiddenError:   # бота заблокировали
                 SUBS.discard(cid)
@@ -327,6 +407,11 @@ async def main():
         BotCommand(command="remind", description="Напоминания"),
         BotCommand(command="pdf", description="PDF на печать"),
     ])
+    try:   # описание не критично: без него бот работает
+        await bot.set_my_description(DESCRIPTION)
+        await bot.set_my_short_description(SHORT_DESCRIPTION)
+    except TelegramBadRequest:
+        logging.exception("set description failed")
     if WEBAPP_URL:
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
             text="Приложение", web_app=WebAppInfo(url=WEBAPP_URL)))
