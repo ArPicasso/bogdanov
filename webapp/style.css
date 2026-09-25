@@ -601,42 +601,35 @@ h1, .display {
 /* Наклейка талисмана: белая вырубка и чёрный край уже на картинке, одинаковая в обеих темах */
 .guide { position: relative; flex: none; display: inline-block; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .guide img { display: block; width: 88px; height: 88px; transform: rotate(-6deg); }
-/* Онбординг: талисман стоит на кнопке «Готово», облачко — справа. Сетка под пальцем не сдвигается */
-.onb-pad { height: 220px; }
-.onb-guide {
-  position: absolute; left: 12px; right: 16px; bottom: calc(100% - 20px);
-  max-width: 540px; margin: 0 auto;
-  display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
+/* Знакомство, тур, приветствие — карточка по центру экрана поверх притемнённого фона.
+   Крупный талисман стоит на верхнем крае карточки и выходит за него */
+.coach {
+  position: fixed; inset: 0; z-index: 11;
+  display: grid; place-items: center;
+  padding: 16px 16px calc(96px + env(safe-area-inset-bottom));
 }
-.onb-guide[hidden] { display: none; }
-.onb-guide > * { pointer-events: auto; }
-.onb-guide .bubble { margin-bottom: 30px; }
-/* Облачко — белая наклейка с хвостиком к талисману */
-.bubble { position: relative; min-width: 0; padding: 10px 14px; border: var(--line); border-radius: 20px; background: var(--paper); font: 500 14px/1.4 var(--ui); }
-.bubble::before {
-  content: ""; position: absolute; left: -7px; top: 50%; width: 12px; height: 12px;
-  background: var(--paper); border-left: var(--line); border-bottom: var(--line);
-  transform: translateY(-50%) rotate(45deg);
+.coach-back { position: absolute; inset: 0; background: rgba(9, 13, 20, .58); }
+/* Шаг тура: карточка у меню, чтобы экран, о котором она рассказывает, был виден сверху */
+.coach.low { align-items: end; }
+.coach-card {
+  position: relative; width: 100%; max-width: 360px;
+  margin-top: 118px; padding: 104px 18px 16px;
+  border: var(--line); border-radius: 28px; background: var(--paper); color: var(--ink);
+  text-align: center;
 }
-/* Подсказка тура — облачко над меню, стрелка показывает на вкладку */
-.tour {
-  position: fixed; z-index: 7;
-  left: 12px; right: 12px; bottom: calc(86px + env(safe-area-inset-bottom));
-  max-width: 536px; margin: 0 auto;
-  display: flex; gap: 12px; align-items: flex-start;
-  padding: 14px; border: var(--line); border-radius: 20px; background: var(--paper);
-}
-.tour .guide img { width: 60px; height: 60px; }
-.tour-body { min-width: 0; flex: 1; }
-.tour p { margin: 2px 0 10px; font: 500 15px/1.4 var(--ui); text-wrap: pretty; }
-.tour-btns { display: flex; align-items: center; gap: 8px; }
-.btn.small { display: inline-block; width: auto; margin: 0; padding: 10px 18px; font-size: 14px; }
-.tour-skip { min-height: 40px; padding: 0 8px; border: 0; background: none; color: var(--muted); font: 700 13px/1 var(--ui); letter-spacing: .03em; cursor: pointer; }
-.tour-count { margin-left: auto; color: var(--muted); font-size: 12px; }
-.tour-arrow {
-  position: absolute; bottom: -7px; left: 50%; width: 12px; height: 12px;
-  background: var(--paper); border-right: var(--line); border-bottom: var(--line); transform: rotate(45deg);
-}
+.coach-card.bare { margin-top: 0; padding-top: 22px; }
+.coach-guide { position: absolute; left: 50%; top: -110px; transform: translateX(-50%); }
+.coach-guide .guide img { width: 196px; height: 196px; }
+.coach p { margin: 0 0 16px; font: 500 17px/1.4 var(--ui); text-wrap: pretty; }
+.coach-btns { display: grid; gap: 4px; }
+.coach-btns .btn { margin: 0; }
+.coach-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.coach-skip { min-height: 44px; padding: 0 10px; border: 0; background: none; color: var(--muted); font: 700 13px/1 var(--ui); letter-spacing: .03em; cursor: pointer; }
+.coach-count { color: var(--muted); font-size: 12px; }
+/* Вкладка, о которой говорит тур, — над притемнением и с пульсирующей обводкой */
+.tabs.coach-on { z-index: 12; }
+.tabs .coach-hl { box-shadow: 0 0 0 3px var(--sun); animation: coach-pulse 1.2s ease-in-out infinite; }
+@keyframes coach-pulse { 50% { box-shadow: 0 0 0 7px var(--sun); } }
 .guide-empty { display: grid; justify-items: center; gap: 10px; }
 
 /* ---------- нижняя навигация ---------- */
@@ -1030,5 +1023,5 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
 
 @media (prefers-reduced-motion: reduce) {
   .tabs button, .pick, .pick .em, .cta-bar, .pills button, .seg button, .chips button { transition: none; }
-  .pick.pop, .sk, .row.busy, .flow.draw .fl-cover, .flow.draw .fl-dot .v { animation: none; }
+  .pick.pop, .sk, .row.busy, .flow.draw .fl-cover, .flow.draw .fl-dot .v, .tabs .coach-hl { animation: none; }
 }
