@@ -45,6 +45,9 @@ const state = {
   conf: "east",
   scrolledToNext: false,
   h2h: null,        // история очных встреч (ADR-006): грузится при первом открытии карточки матча
+  tableView: "teams",   // «Таблица»: команды или лидеры лиги (ADR-009)
+  leadCat: "pts",
+  leaders: null,    // лидеры лиги: грузятся при первом открытии «Игроков»
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -615,11 +618,47 @@ function refreshCalendar(keep) {
 }
 
 function renderTable() {
-  const conf = state.conf;
-  const html = `<section class="band mint"><h1>Таблица</h1><div class="pills" role="group" aria-label="Конференция">${Object.entries(CONF)
-    .map(([k, v]) => `<button class="${conf === k ? "on" : ""}" data-conf="${k}" aria-pressed="${conf === k}">${v}</button>`)
-    .join("")}</div></section>`;
-  return `${html}<div id="table-body">${tableBody()}</div>`;
+  return `<section class="band mint"><h1>Таблица</h1><div id="table-filters">${tableFilters()}</div></section>
+    <div id="table-body">${state.tableView === "players" ? leadersBody() : tableBody()}</div>`;
+}
+
+// Шапка «Таблицы»: «Команды · Игроки», под ними конференции или показатели (ADR-009).
+// Ряд пилюль один в обоих видах — высота шапки не прыгает
+function tableFilters() {
+  const players = state.tableView === "players";
+  const pills = players
+    ? LEAD_CATS.map(([k, v]) => `<button class="${state.leadCat === k ? "on" : ""}" data-lead-cat="${k}" aria-pressed="${state.leadCat === k}">${v}</button>`)
+    : Object.entries(CONF).map(([k, v]) => `<button class="${state.conf === k ? "on" : ""}" data-conf="${k}" aria-pressed="${state.conf === k}">${v}</button>`);
+  return `<div class="seg table-seg" role="group" aria-label="Что показать" data-run="table-view">${RUN}
+      ${segBtn(!players, 'data-table-view="teams"', "<span>Команды</span>")}
+      ${segBtn(players, 'data-table-view="players"', "<span>Игроки</span>")}
+    </div>
+    <div class="pills" role="group" aria-label="${players ? "Показатель" : "Конференция"}">${pills.join("")}</div>`;
+}
+
+// Выбранная пилюля показателя не должна прятаться за краем ряда. Прокручиваем только ряд, не страницу
+function pillInView(root) {
+  const on = root.querySelector(".pills .on");
+  if (!on) return;
+  const row = on.parentNode;
+  if (on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = on.offsetLeft + on.offsetWidth - row.clientWidth + 16;
+  else if (on.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, on.offsetLeft - 16);
+}
+
+// «Команды · Игроки»: бегунок перетекает сразу, список — в следующем кадре
+function refreshTable() {
+  const bar = $("#table-filters");
+  if (!bar) return render();
+  const prev = runnerState(bar);
+  bar.innerHTML = tableFilters();
+  placeRunners(bar, prev);
+  pillInView(bar);
+  nextFrame(() => {
+    const box = $("#table-body");
+    if (!box || state.tab !== "table") return;
+    box.innerHTML = state.tableView === "players" ? leadersBody() : tableBody();
+    fadeIn(box);
+  });
 }
 
 function tableBody() {
@@ -642,6 +681,91 @@ function tableBody() {
   html += `<div class="foot">${played
     ? "Победа — 2 очка, поражение в овертайме или по буллитам — 1. В плей-офф выходят 8 команд конференции."
     : "Сезон стартует 3 октября — таблица заполнится после первых матчей."}</div>`;
+  return html;
+}
+
+// ---------- лидеры лиги (ADR-009) ----------
+
+// Показатель → подпись пилюли и колонки строки; выбранная колонка — жирным
+const LEAD_CATS = [["pts", "Бомбардиры"], ["g", "Снайперы"], ["a", "Ассистенты"], ["pm", "+/−"], ["sv_pct", "Вратари"], ["pim", "Штраф"]];
+const LEAD_COLS = {
+  pts: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
+  g: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
+  a: [["gp", "И"], ["g", "Ш"], ["a", "А"], ["pts", "О"]],
+  pm: [["gp", "И"], ["pts", "О"], ["pm", "+/−"]],
+  pim: [["gp", "И"], ["pts", "О"], ["pim", "Штр"]],
+  sv_pct: [["gp", "И"], ["gaa", "КН"], ["sv_pct", "%ОБ"]],
+};
+const LEAD_LEGEND = {
+  pts: "И — игры, Ш — голы, А — передачи, О — очки: гол или передача",
+  pm: "+/− — забитые минус пропущенные шайбы, пока игрок на льду; голы в большинстве не считаются",
+  pim: "Штр — штрафные минуты",
+  sv_pct: "%ОБ — отражённые броски, КН — пропущено в среднем за 60 минут. Вратари с малым игровым временем в список лиги не входят",
+};
+
+let leadersLoading = null;
+let leadersFailed = false;   // не качаем по кругу: после ошибки — «Повторить»
+function loadLeaders() {
+  if (!leadersLoading) {
+    leadersFailed = false;
+    leadersLoading = fetch("data/leaders.json")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+      .then((d) => (state.leaders = d))
+      .catch(() => { leadersLoading = null; leadersFailed = true; return null; });
+  }
+  return leadersLoading;
+}
+function fillLeaders() {
+  loadLeaders().then(() => {
+    const box = $("#table-body");
+    if (!box || state.tab !== "table" || state.tableView !== "players") return;
+    box.innerHTML = leadersBody();
+    fadeIn(box);
+  });
+}
+
+function leadValue(k, v) {
+  if (v == null) return "—";
+  if (k === "pm") return v > 0 ? `+${v}` : v < 0 ? `−${-v}` : "0";
+  if (k === "sv_pct" || k === "gaa") return String(v.toFixed(k === "gaa" ? 2 : 1)).replace(".", ",");
+  return String(v);
+}
+
+function leaderRow(r, cols, main) {
+  const club = r.team
+    ? `${emblem(r.team)}<span>${esc(team(r.team).name)}</span>`
+    : `<span>${esc(r.club)}</span>`;
+  return `<div class="st-row lead-row${r.team && r.team === state.fav ? " me" : ""}">
+    <span class="pos">${r.rank}</span>
+    <span class="pl"><b>${esc(r.name)}</b><small>${club}</small></span>
+    ${cols.map(([k]) => `<span class="${k === main ? "pts" : "n"}${k === "gp" ? " wl" : ""}">${leadValue(k, r[k])}</span>`).join("")}
+  </div>`;
+}
+
+function leadersBody() {
+  const d = state.leaders;
+  if (!d && leadersFailed) return failBlock("Лидеры лиги", "leaders");
+  if (!d) {
+    fillLeaders();
+    return `<div class="sk sk-label"></div><div class="sk" style="height:${38 + 10 * 57}px"></div>`;
+  }
+  const cat = state.leadCat;
+  const rows = d.categories[cat] || [];
+  const cols = LEAD_COLS[cat];
+  const top = rows.filter((r) => r.rank <= 10);
+  const mine = state.fav && !top.some((r) => r.team === state.fav) && rows.find((r) => r.team === state.fav);
+  const past = d.season !== state.data.season;
+  let html = `<div class="label">${esc(d.league)} ${esc(d.season)}<span class="aside">${past ? "прошлый сезон" : esc(d.stage)}</span></div>`;
+  html += `<div class="st lead" style="--cols:${cols.length}"><div class="st-row lead-row head"><span class="pos"></span><span class="pl">Игрок</span>${cols
+    .map(([k, l]) => `<span class="${k === "gp" ? "wl" : ""}">${l}</span>`).join("")}</div>`;
+  html += top.map((r) => leaderRow(r, cols, cat)).join("");
+  if (mine) html += `<div class="cut"><span>лучший в команде</span></div>${leaderRow(mine, cols, cat)}`;
+  html += `</div>`;
+  if (!top.length) html += `<div class="empty">Список появится после первых матчей</div>`;
+  const legend = LEAD_LEGEND[cat] || LEAD_LEGEND.pts;
+  html += `<div class="foot">${legend}.<br>${past
+    ? `Статистика регулярного чемпионата ${esc(d.league)} ${esc(d.season)} с сайта лиги. Клубы — под нынешними названиями. Лидеры сезона ${esc(state.data.season)} появятся после первого тура.`
+    : "Места — как в статистике на сайте лиги."}</div>`;
   return html;
 }
 
@@ -1355,6 +1479,7 @@ function render(dir = 0) {
     window.scrollTo(0, 0);
   }
   if (state.tab === "home") countUp(screen);
+  if (state.tab === "table") pillInView(screen);
   if (dir && !calm()) {
     // двигаем детей, а не сам экран: его край обрезает сдвиг (#screen в style.css)
     for (const el of screen.children) {
@@ -1400,7 +1525,7 @@ function confirmTeam(id = state.draft || state.fav) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],#sheet-backdrop");
+  const el = e.target.closest("[data-tab],[data-game],[data-pick],[data-confirm],[data-cal-team],[data-cal-side],[data-cal-conf],[data-cal-other],[data-cal-pick],[data-conf],[data-team],[data-theme-pick],[data-theme-toggle],[data-close],[data-switch-open],[data-switch],[data-story],[data-invite],[data-remind],[data-recap-tab],[data-recap-goal],[data-recap-pens],[data-recap-side],[data-back],[data-retry],[data-table-view],[data-lead-cat],#sheet-backdrop");
   if (!el || el.disabled) return;
   if (el.hasAttribute("data-switch-open")) return openTeamSheet();
   if (el.dataset.switch) return confirmTeam(el.dataset.switch);
@@ -1416,6 +1541,12 @@ document.addEventListener("click", (e) => {
     return switchTheme(el.dataset.themePick, el);
   }
   if (el.id === "sheet-backdrop" || el.hasAttribute("data-close")) return closeMatch();
+  if (el.dataset.retry === "leaders") {
+    haptic();
+    leadersFailed = false;
+    $("#table-body").innerHTML = leadersBody();
+    return;
+  }
   if (el.dataset.retry) {
     const g = findGame(recapView.id);
     const box = $(`#${el.dataset.retry}`);
@@ -1496,6 +1627,23 @@ document.addEventListener("click", (e) => {
     state.cal.side = el.dataset.calSide;
     haptic();
     return refreshCalendar(true);
+  }
+  if (el.dataset.tableView) {
+    if (el.dataset.tableView === state.tableView) return;
+    state.tableView = el.dataset.tableView;
+    haptic();
+    return refreshTable();
+  }
+  if (el.dataset.leadCat) {
+    state.leadCat = el.dataset.leadCat;
+    haptic();
+    el.parentNode.querySelectorAll("[data-lead-cat]").forEach((b) => {
+      b.classList.toggle("on", b === el);
+      b.setAttribute("aria-pressed", b === el);
+    });
+    pillInView(el.parentNode);
+    $("#table-body").innerHTML = leadersBody();
+    return fadeIn($("#table-body"));
   }
   if (el.dataset.conf) {
     state.conf = el.dataset.conf;

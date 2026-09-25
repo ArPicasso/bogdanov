@@ -45,6 +45,12 @@ jobs:
         continue-on-error: true
         run: python league.py --site "${{ vars.LEAGUE_SITE }}"
 
+      # Лидеры лиги (ADR-009). Пока у нового сезона нет статистики, остаётся прошлый из leaders.json в git
+      - name: Скачать лидеров лиги
+        if: vars.LEAGUE_SITE != ''
+        continue-on-error: true
+        run: python league.py --leaders --site "${{ vars.LEAGUE_SITE }}"
+
       # Ссылки на бота и мини-апп (ADR-004) заданы в build_data.py; Variables BOT_LINK, APP_LINK их заменяют
       - name: Собрать данные
         env:
