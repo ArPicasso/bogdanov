@@ -5,6 +5,7 @@
 ровный участок майки — туда мини-апп ставит номер, — и цвет цифр: белый на тёмной майке,
 чёрный на светлой. Итог — art/players/kits.json, его читает build_data.py. Запускать руками после новых картинок:
 
+    venv/bin/pip install pillow   # один раз: боту и мини-аппу Pillow не нужен
     venv/bin/python tools/player_kits.py
 """
 import json
