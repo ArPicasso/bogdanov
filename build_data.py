@@ -611,8 +611,8 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results,
             "results": "протоколы лиги",
         },
         "links": links(),
-        # colors — цвета формы: в них переодевается Кэп (ADR-010)
-        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo", "colors") if k in t} for t in teams.all],
+        # mascot — проводник онбординга: имя и фразы (ADR-011); colors — цвета формы
+        "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo", "colors", "mascot") if k in t} for t in teams.all],
         "games": games,
         "standings": standings(teams, games),
         # форма клубов для стикеров игроков: составы в разборе матча и лидеры (ADR-009)

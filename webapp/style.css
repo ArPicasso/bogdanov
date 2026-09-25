@@ -596,12 +596,22 @@ h1, .display {
 .empty { text-align: center; padding: 28px 16px; color: var(--muted); border: var(--line); border-radius: 20px; }
 .foot { color: var(--muted); font-size: 12px; line-height: 1.5; text-align: center; margin-top: 24px; padding: 0 12px; }
 
-/* ---------- Кэп: знакомство и подсказки (ADR-010) ---------- */
+/* ---------- Проводник — талисман клуба (ADR-011) ---------- */
 
-.cap { position: relative; flex: none; display: inline-block; }
-.cap-svg { display: block; width: 84px; height: 92px; transform: rotate(-6deg); }
-.cap-intro { display: flex; align-items: center; gap: 14px; margin: 0 52px 16px 0; }
-/* Облачко — белая наклейка с хвостиком к Кэпу */
+/* Наклейка талисмана: белая вырубка и чёрный край уже на картинке, одинаковая в обеих темах */
+.guide { position: relative; flex: none; display: inline-block; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.guide img { display: block; width: 88px; height: 88px; transform: rotate(-6deg); }
+/* Онбординг: талисман стоит на кнопке «Готово», облачко — справа. Сетка под пальцем не сдвигается */
+.onb-pad { height: 220px; }
+.onb-guide {
+  position: absolute; left: 12px; right: 16px; bottom: calc(100% - 20px);
+  max-width: 540px; margin: 0 auto;
+  display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
+}
+.onb-guide[hidden] { display: none; }
+.onb-guide > * { pointer-events: auto; }
+.onb-guide .bubble { margin-bottom: 30px; }
+/* Облачко — белая наклейка с хвостиком к талисману */
 .bubble { position: relative; min-width: 0; padding: 10px 14px; border: var(--line); border-radius: 20px; background: var(--paper); font: 500 14px/1.4 var(--ui); }
 .bubble::before {
   content: ""; position: absolute; left: -7px; top: 50%; width: 12px; height: 12px;
@@ -616,7 +626,7 @@ h1, .display {
   display: flex; gap: 12px; align-items: flex-start;
   padding: 14px; border: var(--line); border-radius: 20px; background: var(--paper);
 }
-.tour .cap-svg { width: 58px; height: 64px; }
+.tour .guide img { width: 60px; height: 60px; }
 .tour-body { min-width: 0; flex: 1; }
 .tour p { margin: 2px 0 10px; font: 500 15px/1.4 var(--ui); text-wrap: pretty; }
 .tour-btns { display: flex; align-items: center; gap: 8px; }
@@ -627,7 +637,7 @@ h1, .display {
   position: absolute; bottom: -7px; left: 50%; width: 12px; height: 12px;
   background: var(--paper); border-right: var(--line); border-bottom: var(--line); transform: rotate(45deg);
 }
-.cap-empty { display: grid; justify-items: center; gap: 10px; }
+.guide-empty { display: grid; justify-items: center; gap: 10px; }
 
 /* ---------- нижняя навигация ---------- */
 
@@ -919,6 +929,8 @@ h1.fit { font-size: clamp(22px, calc((min(100vw, 560px) - 84px) / (var(--w, 8) *
   border: var(--line); border-radius: 9999px; background: var(--paper); color: var(--ink);
   font: 700 11px/1 var(--ui); letter-spacing: .05em; text-transform: uppercase;
 }
+.pp-guide { position: absolute; top: -30px; right: -6px; }
+.pp-guide .guide img { width: 80px; height: 80px; transform: rotate(8deg); }
 .pp-star { width: 40px; height: 40px; margin: -6px -4px 0 0; transform: rotate(14deg); fill: var(--sun); stroke: #000; stroke-width: 5; stroke-linejoin: round; }
 .pp-main { display: flex; align-items: center; gap: 16px; margin-top: 10px; }
 .pp-name { min-width: 0; }
