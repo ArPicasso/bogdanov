@@ -866,9 +866,11 @@ function teamGrid(chosen, attr) {
 
 function renderOnboarding() {
   const chosen = state.draft;
-  let html = `<section class="band sky"><div class="cap-intro"><span id="cap-onb">${capFig(chosen ? "thumbs" : "hello", chosen)}</span>
+  let html = CAP_ON
+    ? `<section class="band sky"><div class="cap-intro"><span id="cap-onb">${capFig(chosen ? "thumbs" : "hello", chosen)}</span>
       <div class="bubble" id="cap-say">${capOnbText(chosen)}</div></div>
-    <h1>За кого<br>болеешь?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
+    <h1>За кого<br>болеешь?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`
+    : `<section class="band sky"><h1>За кого<br>болеете?</h1><div class="lede">Главный экран, календарь и таблица подстроятся под команду. Поменять можно в любой момент.</div></section>`;
   html += teamGrid(chosen, "data-pick");
   const label = chosen ? `Готово — ${esc(team(chosen).name)}` : "Выберите команду";
   html += `<div style="height:88px"></div><div class="cta-bar${chosen ? "" : " wait"}"><button class="btn" data-confirm${chosen ? "" : " disabled"}>${label}</button></div>`;
@@ -877,6 +879,9 @@ function renderOnboarding() {
 
 // ---------- Кэп: знакомство и подсказки (ADR-010) ----------
 
+// Кэп на паузе: владелец продукта вернётся к идее (ADR-010). Код остаётся, true — включить
+// знакомство на экране выбора команды, тур, «Показать подсказки» и Кэпа в «Не удалось загрузить»
+const CAP_ON = false;
 const TOUR_KEY = "tour_done";
 const tourDone = () => lsGet(TOUR_KEY) === "1";
 
@@ -1094,7 +1099,7 @@ function renderMe() {
       : `<div class="menu-row off">${ICON_ME.bell}<span><b>Напоминания о матчах</b><small>Пока только о «Рязань-ВДВ». Скоро — о любой команде</small></span></div>`;
   }
   html += `<button type="button" class="menu-row" data-switch-open>${ICON_ME.swap}<span><b>Сменить команду</b><small>Сейчас: ${esc(t.name)}</small></span>${ICON_ME.chev}</button>
-  <button type="button" class="menu-row" data-tour-restart>${ICON_ME.help}<span><b>Показать подсказки</b><small>Кэп ещё раз покажет, что где</small></span>${ICON_ME.chev}</button>
+  ${CAP_ON ? `<button type="button" class="menu-row" data-tour-restart>${ICON_ME.help}<span><b>Показать подсказки</b><small>Кэп ещё раз покажет, что где</small></span>${ICON_ME.chev}</button>` : ""}
   </div>`;
   html += themePills();
   return html + footer();
@@ -1166,7 +1171,7 @@ function h2hSkeleton() {
   return `<div class="sk sk-label"></div><div class="sk" style="height:152px"></div><div class="sk sk-label"></div><div class="sk" style="height:${5 * 75}px"></div>`;
 }
 function failBlock(title, what) {
-  return `<div class="label">${title}</div><div class="empty cap-empty">${capFig("shrug")}<div>Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div></div>`;
+  return `<div class="label">${title}</div><div class="empty${CAP_ON ? " cap-empty" : ""}">${CAP_ON ? capFig("shrug") : ""}<div>Не удалось загрузить. Проверьте интернет.<br><button type="button" class="retry" data-retry="${what}">Повторить</button></div></div>`;
 }
 function fadeIn(el) {
   if (el && !calm()) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
@@ -1776,7 +1781,7 @@ function confirmTeam(id = state.draft || state.fav) {
   if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
   render(dir);
   // новичок, пришедший не по ссылке, — Кэп показывает приложение (ADR-010)
-  if (!wasFav && !tourDone() && !state.openedFromLink) nextFrame(() => startTour(false));
+  if (CAP_ON && !wasFav && !tourDone() && !state.openedFromLink) nextFrame(() => startTour(false));
 }
 
 document.addEventListener("click", (e) => {
@@ -2095,7 +2100,7 @@ function boot(d, cached = false) {
     openMatch(mid);
   }
   // Кэп знакомится и с теми, кто выбрал команду раньше, — один раз и не поверх ссылки из бота
-  if (state.fav && !tourDone() && !state.openedFromLink && !state.tour) {
+  if (CAP_ON && state.fav && !tourDone() && !state.openedFromLink && !state.tour) {
     setTimeout(() => { if (!state.tour && !tourDone() && $("#sheet").hidden) startTour(true); }, (cached ? SPLASH_REPEAT_MS : SPLASH_MIN_MS) + 500);
   }
 }
