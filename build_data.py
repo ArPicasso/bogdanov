@@ -522,7 +522,8 @@ def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset(), past: dict[
     Места — как у лиги. Скрытого игрока нет в списке, место за ним остаётся пустым.
     Клуб прошлого сезона — нынешний id по teams.json; клуба нет в РХЛ — название и эмблема из
     past_clubs.json. Амплуа и номер — для стикера игрока вместо фото (фото не берём, ADR-007);
-    `kit` — какой клубной формы стикер, если картинка есть в art/players/kits.json."""
+    `kit` — какой клубной формы стикер, если картинка есть в art/players/kits.json; сам список
+    форм мини-апп берёт из league.json."""
     if not src.get("categories"):
         return None
     past = load_past_clubs() if past is None else past
@@ -533,7 +534,6 @@ def leaders(teams: Teams, src: dict, hidden: set[int] = frozenset(), past: dict[
         "league": "РХЛ" if "rhl." in src.get("site", "") else "НМХЛ",
         "stage": "плей-офф" if "Плей-офф" in src.get("name", "") else "регулярный чемпионат",
         "updated": src.get("updated", ""),
-        "kits": kits,
         "categories": {},
     }
     for cat, fields in LEADER_FIELDS.items():
@@ -595,6 +595,8 @@ def build(teams: Teams, raw: list[rhockey.RawGame], results: league.Results,
         "teams": [{k: t[k] for k in ("id", "abbr", "name", "city", "conf", "logo") if k in t} for t in teams.all],
         "games": games,
         "standings": standings(teams, games),
+        # форма клубов для стикеров игроков: составы в разборе матча и лидеры (ADR-009)
+        "kits": load_kits(),
     }
     return data, unmatched, details
 

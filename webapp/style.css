@@ -771,10 +771,10 @@ h1, .display {
 
 .roster { border: var(--line); border-radius: 20px; }
 .roster .grp { padding: 10px 14px 4px; font: 700 11px/1.2 var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-.roster .pl { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; padding: 9px 14px; }
+.roster .pl { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 7px 14px; }
+.roster .pl.dnp .ps { opacity: .5; }
 .roster .pl + .pl { border-top: 1px solid var(--mist); }
 .roster .pl.scored { background: var(--sel); }
-.roster .no { font: 800 13px/1 var(--display); color: var(--muted); }
 .roster .nm { min-width: 0; font-weight: 700; }
 .roster .nm .tag { height: 20px; padding: 0 7px; font-size: 10px; margin-left: 6px; vertical-align: 1px; }
 .roster .pts { font-weight: 700; font-size: 13px; }

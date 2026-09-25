@@ -806,7 +806,7 @@ function leadersBody() {
 // (tools/player_kits.py). Формы клуба нет — общий стикер из webapp/players/
 function figure(r) {
   const role = r.role === "G" ? "goalie" : "skater";
-  const kit = r.kit && state.leaders && state.leaders.kits && state.leaders.kits[r.kit];
+  const kit = r.kit && state.data && state.data.kits && state.data.kits[r.kit];
   const at = kit && kit[role];
   const src = at ? `players/clubs/${esc(r.kit)}-${role}.webp` : `players/${role}.webp`;
   // y — середина ровного участка груди; строка номера высотой 20% ширины, поэтому верх на 10% выше
@@ -1280,7 +1280,9 @@ function rosterTab(g, d) {
     for (const p of r[key]) {
       const pts = p.dnp ? "запас" : key === "G" ? "" : `${p.g}+${p.a}`;
       const scored = !p.dnp && p.g + p.a > 0;
-      html += `<div class="pl${scored ? " scored" : ""}"><span class="no num">${p.no != null ? esc(p.no) : ""}</span>
+      // стикер в форме команды с номером игрока на груди — как у лидеров (ADR-009)
+      const sticker = figure({ kit: sideTeam(g, side), role: key === "G" ? "G" : "F", number: p.no });
+      html += `<div class="pl${scored ? " scored" : ""}${p.dnp ? " dnp" : ""}"><span class="ps">${sticker}</span>
         <span class="nm">${esc(p.name)}${p.cap ? `<span class="tag soft">${esc(p.cap)}</span>` : ""}</span>
         <span class="pts num${scored ? "" : " z"}">${pts}</span></div>`;
     }

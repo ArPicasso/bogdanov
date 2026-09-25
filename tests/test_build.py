@@ -362,6 +362,12 @@ class Leaders(unittest.TestCase):
         src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
         self.assertEqual(b.leaders(self.teams, src, kits=kits)["categories"]["pts"][0]["kit"], "buran")   # ушедший клуб
 
+    def test_kits_in_league_json(self):
+        """Форма клубов — в league.json: её берут и лидеры, и составы в разборе матча."""
+        data, _, _ = b.build(self.teams, [], {})
+        self.assertEqual(data["kits"], b.load_kits())
+        self.assertNotIn("kits", b.leaders(self.teams, self.src))
+
     def test_every_club_has_both_kits(self):
         """Картинки формы есть у всех 26 команд и 4 ушедших клубов, у каждого — полевой и вратарь."""
         kits = b.load_kits()
