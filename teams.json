@@ -1,7 +1,7 @@
 [
   {"id": "arktika", "abbr": "АРК", "logo": "logos/arktika.png", "name": "Арктика", "city": "Мурманская область", "conf": "west", "rhockey": 19080, "aliases": []},
-  {"id": "akhmat-granit", "abbr": "АХМ", "logo": "logos/akhmat-granit.png", "name": "Ахмат-Гранит", "city": "Чеченская Республика", "conf": "west", "rhockey": 27978, "aliases": []},
-  {"id": "vityaz-podolsk", "abbr": "ВИТ", "name": "Витязь-Подольск", "city": "Подольск", "conf": "west", "rhockey": 27980, "aliases": []},
+  {"id": "akhmat-granit", "abbr": "АХМ", "logo": "logos/akhmat-granit.png", "name": "Ахмат-Гранит", "city": "Чеченская Республика", "conf": "west", "rhockey": 27978, "aliases": [], "former": ["Гранит-Чехов", "Гранит"]},
+  {"id": "vityaz-podolsk", "abbr": "ВИТ", "name": "Витязь-Подольск", "city": "Подольск", "conf": "west", "rhockey": 27980, "aliases": [], "former": ["Воевода"]},
   {"id": "dinamo-576", "abbr": "576", "logo": "logos/dinamo-576.png", "name": "Динамо-576", "city": "Санкт-Петербург", "conf": "west", "rhockey": 17690, "aliases": ["ХК Динамо-576"]},
   {"id": "kaluga", "abbr": "КЛР", "logo": "logos/kaluga.png", "name": "Калужские Ракеты", "city": "Калуга", "conf": "west", "rhockey": 27979, "aliases": ["МХК Калуга"]},
   {"id": "krasnaya-mashina", "abbr": "КМА", "name": "Красная машина Академия", "city": "Московская область", "conf": "west", "rhockey": 27965, "aliases": []},

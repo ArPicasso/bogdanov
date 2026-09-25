@@ -17,7 +17,9 @@ TZ = ZoneInfo("Europe/Moscow")
 TEAMS_FILE = BASE / "teams.json"
 OFFICIAL_GAMES = BASE / "games.json"
 OFFICIAL_TEAM = "ryazan-vdv"          # у кого из команд есть официальный календарь — games.json
+HISTORY_FILE = BASE / "history.json"
 OUT = BASE / "webapp" / "data" / "league.json"
+H2H_LAST = 5
 
 
 def norm(name: str) -> str:
@@ -32,9 +34,14 @@ class Teams:
         self.all = teams
         self.by_rh = {t["rhockey"]: t["id"] for t in teams}
         self.by_name = {norm(n): t["id"] for t in teams for n in [t["name"], *t["aliases"]]}
+        self.by_former = {norm(n): t["id"] for t in teams for n in t.get("former", [])}
 
     def find(self, name: str) -> str | None:
         return self.by_name.get(norm(name))
+
+    def find_past(self, name: str) -> str | None:
+        """То же, но с прежними названиями клубов — для матчей прошлых сезонов (ADR-006)."""
+        return self.find(name) or self.by_former.get(norm(name))
 
 
 def load_teams(path: Path = TEAMS_FILE) -> Teams:
@@ -145,6 +152,46 @@ def standings(teams: Teams, games: list[dict]) -> dict[str, list[dict]]:
         table[conf[r.team]].append(r.to_json())
     return table
 
+# ---------- очные встречи ----------
+
+
+def load_history(path: Path = HISTORY_FILE) -> list[dict]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["games"]
+    except (FileNotFoundError, ValueError, KeyError):
+        return []
+
+
+def pair_key(a: str, b: str) -> str:
+    return "|".join(sorted((a, b)))
+
+
+def head_to_head(games: list[dict], history: list[dict]) -> dict[str, dict]:
+    """Для каждой пары из календаря сезона: победы, голы и последние встречи (ADR-006).
+
+    Встречи — прошлые сезоны из history.json плюс уже сыгранные матчи этого сезона."""
+    past = [{k: h[k] for k in ("date", "home", "away", "score", "decision")} for h in history]
+    past += [{"date": g["date"], "home": g["home"], "away": g["away"],
+              "score": [g["score"]["home"], g["score"]["away"]], "decision": g["score"]["decision"]}
+             for g in games if g.get("score")]
+    by_pair: dict[str, list[dict]] = {}
+    for m in sorted(past, key=lambda m: m["date"]):
+        by_pair.setdefault(pair_key(m["home"], m["away"]), []).append(m)
+    out = {}
+    for key in sorted({pair_key(g["home"], g["away"]) for g in games}):
+        a, b = key.split("|")
+        wins, goals = {a: 0, b: 0}, {a: 0, b: 0}
+        meetings = by_pair.get(key, [])
+        for m in meetings:
+            hs, as_ = m["score"]
+            goals[m["home"]] += hs
+            goals[m["away"]] += as_
+            wins[m["home"] if hs > as_ else m["away"]] += 1
+        out[key] = {"games": len(meetings), "wins": wins, "goals": goals,
+                    "since": meetings[0]["date"][:4] if meetings else None,
+                    "last": meetings[::-1][:H2H_LAST]}
+    return out
+
 # ---------- сборка ----------
 
 
@@ -187,6 +234,8 @@ def main() -> None:
     data, unmatched = build(teams, raw, league.load_results(args.results))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    h2h = head_to_head(data["games"], load_history())
+    (args.out.parent / "h2h.json").write_text(json.dumps(h2h, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     played = sum(1 for g in data["games"] if g.get("score"))
     print(f"Матчей: {len(data['games'])}, сыграно: {played} → {args.out}")
     for u in unmatched:
