@@ -96,46 +96,6 @@ class Standings(unittest.TestCase):
                           "gf": 192, "ga": 69, "pts": 92})
 
 
-class Leaders(unittest.TestCase):
-    """ADR-009: топ-10 и лучший игрок каждой команды за десяткой."""
-    teams = b.load_teams()
-    src = {"site": "https://nmhl.fhr.ru", "name": "25/26 | Регулярный чемпионат", "categories": {"pts": [
-        {"rank": i, "name": f"Игрок {i}", "id": i, "club": club, "gp": 40, "g": 10, "a": 10, "pts": 60 - i, "pm": 3}
-        for i, club in enumerate(["Полёт"] * 10 + ["Буран Мск", "ХК Брянск", "Воевода", "ХК Брянск"], start=1)]}}
-
-    def test_season_and_top(self):
-        top = b.leaders(self.teams, self.src)
-        self.assertEqual((top["season"], top["league"], top["stage"]), ("2025/26", "НМХЛ", "регулярный чемпионат"))
-        rows = top["categories"]["pts"]
-        self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
-        self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
-
-    def test_club_outside_league_keeps_name(self):
-        src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
-        row = b.leaders(self.teams, src)["categories"]["pts"][0]
-        self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
-
-    def test_past_club_logos_exist(self):
-        for logo in set(b.load_past_logos().values()):
-            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
-
-    def test_hidden_player(self):
-        rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
-        self.assertNotIn(1, [r["rank"] for r in rows])
-
-    def test_no_file(self):
-        self.assertIsNone(b.leaders(self.teams, {}))
-
-    def test_leaders_file_in_git(self):
-        data = b.leaders(self.teams, b.load_leaders())
-        self.assertTrue(all(len([r for r in v if r["rank"] <= 10]) == 10 for v in data["categories"].values()))
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Links(unittest.TestCase):
     def test_only_telegram_links(self):
         env = {"BOT_LINK": "https://t.me/rhl_bot/", "APP_LINK": "http://evil.example/app"}
@@ -237,46 +197,6 @@ class MatchRecap(unittest.TestCase):
 
     def test_hidden_file_is_a_list(self):
         self.assertIsInstance(json.loads((ROOT / "hidden_players.json").read_text(encoding="utf-8")), list)
-
-
-class Leaders(unittest.TestCase):
-    """ADR-009: топ-10 и лучший игрок каждой команды за десяткой."""
-    teams = b.load_teams()
-    src = {"site": "https://nmhl.fhr.ru", "name": "25/26 | Регулярный чемпионат", "categories": {"pts": [
-        {"rank": i, "name": f"Игрок {i}", "id": i, "club": club, "gp": 40, "g": 10, "a": 10, "pts": 60 - i, "pm": 3}
-        for i, club in enumerate(["Полёт"] * 10 + ["Буран Мск", "ХК Брянск", "Воевода", "ХК Брянск"], start=1)]}}
-
-    def test_season_and_top(self):
-        top = b.leaders(self.teams, self.src)
-        self.assertEqual((top["season"], top["league"], top["stage"]), ("2025/26", "НМХЛ", "регулярный чемпионат"))
-        rows = top["categories"]["pts"]
-        self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
-        self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
-
-    def test_club_outside_league_keeps_name(self):
-        src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
-        row = b.leaders(self.teams, src)["categories"]["pts"][0]
-        self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
-
-    def test_past_club_logos_exist(self):
-        for logo in set(b.load_past_logos().values()):
-            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
-
-    def test_hidden_player(self):
-        rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
-        self.assertNotIn(1, [r["rank"] for r in rows])
-
-    def test_no_file(self):
-        self.assertIsNone(b.leaders(self.teams, {}))
-
-    def test_leaders_file_in_git(self):
-        data = b.leaders(self.teams, b.load_leaders())
-        self.assertTrue(all(len([r for r in v if r["rank"] <= 10]) == 10 for v in data["categories"].values()))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 def seq(*teams: str, period: str = "2") -> list[dict]:
@@ -423,7 +343,7 @@ class Leaders(unittest.TestCase):
         rows = top["categories"]["pts"]
         self.assertEqual([r["rank"] for r in rows], [*range(1, 11), 12, 13])   # клуба вне РХЛ за десяткой нет
         self.assertEqual(rows[-1]["team"], "vityaz-podolsk")                   # прежнее название — нынешний клуб
-        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team"})   # без id
+        self.assertEqual(set(rows[0]), {"rank", "name", "role", "number", "gp", "g", "a", "pts", "team", "kit"})   # без id
 
     def test_club_outside_league_keeps_name(self):
         src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
@@ -431,8 +351,33 @@ class Leaders(unittest.TestCase):
         self.assertEqual((row["club"], row["logo"]), ("Буран Мск", "logos/past/buran-msk.png"))
 
     def test_past_club_logos_exist(self):
-        for logo in set(b.load_past_logos().values()):
-            self.assertTrue((ROOT / "webapp" / logo).is_file(), logo)
+        for club in b.load_past_clubs().values():
+            self.assertTrue((ROOT / "webapp" / club["logo"]).is_file(), club["logo"])
+
+    def test_kit_for_current_and_past_clubs(self):
+        kits = {"polet": {"skater": [0.8, "#ffffff"]}, "buran": {"skater": [0.8, "#ffffff"]}}
+        rows = b.leaders(self.teams, self.src, kits=kits)["categories"]["pts"]
+        self.assertEqual(rows[0]["kit"], "polet")                        # клуб РХЛ — по id команды
+        self.assertNotIn("kit", rows[-2])                                # формы «Брянска» в этом наборе нет
+        src = {**self.src, "categories": {"pts": [{**self.src["categories"]["pts"][10], "rank": 1}]}}
+        self.assertEqual(b.leaders(self.teams, src, kits=kits)["categories"]["pts"][0]["kit"], "buran")   # ушедший клуб
+
+    def test_kits_in_league_json(self):
+        """Форма клубов — в league.json: её берут и лидеры, и составы в разборе матча."""
+        data, _, _ = b.build(self.teams, [], {})
+        self.assertEqual(data["kits"], b.load_kits())
+        self.assertNotIn("kits", b.leaders(self.teams, self.src))
+
+    def test_every_club_has_both_kits(self):
+        """Картинки формы есть у всех 26 команд и 4 ушедших клубов, у каждого — полевой и вратарь."""
+        kits = b.load_kits()
+        wanted = {t["id"] for t in self.teams.all} | {c["kit"] for c in b.load_past_clubs().values()}
+        self.assertEqual(set(kits), wanted)
+        for club, roles in kits.items():
+            self.assertEqual(set(roles), {"skater", "goalie"}, club)
+            for role, (y, ink) in roles.items():
+                self.assertTrue((ROOT / "webapp" / "players" / "clubs" / f"{club}-{role}.webp").is_file(), f"{club}-{role}")
+                self.assertTrue(0.6 < y < 0.92 and ink in ("#000000", "#ffffff"), f"{club}-{role}")
 
     def test_hidden_player(self):
         rows = b.leaders(self.teams, self.src, hidden={1})["categories"]["pts"]
